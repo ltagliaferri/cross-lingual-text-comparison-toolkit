@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+
+# OS
+.DS_Store
+
+# Generated outputs (not checked in — corpus-dependent)
+/results/
+/visualizations/
+/embeddings/
+
+# Worked example config, kept locally for reference only.
+/config/study.json

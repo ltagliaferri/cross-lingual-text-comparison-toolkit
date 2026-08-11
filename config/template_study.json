@@ -1,0 +1,160 @@
+{
+  "_comment": "Template study config. Copy this file, rename it, and fill in your own corpus — pass it via --config. Required sections: languages, corpora, study, embedding_model, chunking, output. Everything after '_optional_sections_comment' is only read by specific scripts; delete sections for scripts you won't run. Language codes are your own choice (see README's Config section, 'Language codes') — this template uses 'en'/'fr' as illustrative placeholders only, not a requirement.",
+
+  "corpus_root": null,
+
+  "output": {
+    "results_dir": "results",
+    "visualizations_dir": "visualizations",
+    "embeddings_dir": "embeddings"
+  },
+
+  "colors": {
+    "authors": {
+      "author_a": "#4c72b0",
+      "author_b": "#c44e52"
+    }
+  },
+
+  "languages": {
+    "en": {
+      "_comment": "spacy_model (+ optional spacy_model_fallback) is needed if this language is used with adjective_window.py or dependency_parsing.py, or as primary_language for cross_corpus_dependency.py. stanza_model is needed if this is your comparison_language. stopwords_file, keep_short_tokens, and adjective_suffixes are all optional tokenizer tuning — see README.",
+      "spacy_model": "en_core_web_lg",
+      "spacy_model_fallback": "en_core_web_sm",
+      "stopwords_file": null,
+      "keep_short_tokens": [],
+      "adjective_suffixes": []
+    },
+    "fr": {
+      "stanza_model": "fr"
+    }
+  },
+
+  "corpora": {
+    "author_a_work": {
+      "_comment": "type is 'single_file' (one continuous text) or 'collection' (a directory of dated/grouped items, see author_a_collection below). path is relative to corpus_root / --corpus-root.",
+      "label": "Author A's Work",
+      "author": "author_a",
+      "work": "work_id",
+      "language": "en",
+      "type": "single_file",
+      "path": "path/to/your/single_work.txt",
+      "color": "#4c72b0"
+    },
+    "author_a_collection": {
+      "_comment": "For type 'collection': path is a directory containing one subdirectory per entry in 'groups', each holding .txt files (one file per dated/grouped item).",
+      "label": "Author A's Collection",
+      "author": "author_a",
+      "work": "collection_id",
+      "language": "en",
+      "type": "collection",
+      "path": "path/to/your/collection_dir",
+      "groups": ["Group1", "Group2"],
+      "color": "#dd8452"
+    },
+    "author_b_work": {
+      "_comment": "strip_after_marker is optional: drop everything from a marker line onward, e.g. an editorial apparatus section.",
+      "label": "Author B's Work",
+      "author": "author_b",
+      "work": "comparison_work_id",
+      "language": "fr",
+      "type": "single_file",
+      "path": "path/to/comparison_work.txt",
+      "color": "#c44e52"
+    }
+  },
+
+  "study": {
+    "primary_corpora": ["author_a_work", "author_a_collection"],
+    "single_work_corpus": "author_a_work",
+    "collection_corpus": "author_a_collection",
+    "comparison_corpus": "author_b_work",
+    "primary_language": "en",
+    "comparison_language": "fr"
+  },
+
+  "embedding_model": "sentence-transformers/LaBSE",
+
+  "chunking": {
+    "min_chars": 300,
+    "max_chars": 1600,
+    "collection_item_split_threshold": 1800,
+    "collection_item_min_chars": 200
+  },
+
+  "_optional_sections_comment": "Everything below is optional. Each section is read by exactly one script — delete a section if you won't run that script.",
+
+  "term_frequency_clusters": {
+    "_comment": "Used by term_frequency.py. One entry per concept cluster; 'terms' are surface forms in primary_language to count together.",
+    "example_cluster": {
+      "label": "Example Cluster",
+      "terms": ["word1", "word2"]
+    }
+  },
+
+  "adjective_anchor_terms": {
+    "_comment": "Used by adjective_window.py. Each key is an anchor concept; its list is that concept's surface forms in primary_language.",
+    "example_anchor": ["word1", "word2"]
+  },
+
+  "dependency_agents": {
+    "_comment": "Used by dependency_parsing.py. role is a spaCy dependency label (e.g. 'nsubj', 'obj').",
+    "example_agent": {
+      "label": "Example Agent",
+      "lemmas": ["lemma1", "lemma2"],
+      "role": "nsubj",
+      "color": "#4c72b0"
+    }
+  },
+
+  "cross_corpus_concept_clusters": {
+    "_comment": "Used by cross_corpus_frequency.py. Each cluster has one key per language code (must match your languages' codes) holding that language's surface/inflected forms for the same concept.",
+    "example_cluster": {
+      "label": "Example Cluster",
+      "en": ["word1", "word2"],
+      "fr": ["mot1", "mot2"]
+    }
+  },
+
+  "cross_corpus_dependency": {
+    "_comment": "Used by cross_corpus_dependency.py. agent_a/agent_b are arbitrary role names — see README. 'primary' is spaCy-side (lemmas, primary_language); 'comparison' is Stanza-side (surface forms, comparison_language).",
+    "agent_a_label": "Agent A",
+    "agent_b_label": "Agent B",
+    "window": 10,
+    "primary": {
+      "agent_a_lemmas": ["lemma1"],
+      "agent_b_lemmas": ["lemma2"],
+      "adj_filter": []
+    },
+    "comparison": {
+      "agent_a_forms": ["form1"],
+      "agent_b_forms": ["form2"],
+      "name_forms": ["name1"],
+      "adj_filter": []
+    }
+  },
+
+  "speaker_segmentation": {
+    "_comment": "Used by speaker_segmentation.py — only meaningful for a dialogic single_file corpus with a consistent attribution convention. Read the module docstring in src/speaker_segmentation.py before configuring this: the segmentation rules are tuned for a specific dialogue-formatting convention and will likely need code changes, not just config, for a different one.",
+    "corpus": "author_a_work",
+    "speaker_labels": {"speaker_1": "Speaker 1", "speaker_2": "Speaker 2", "narrative": "Narrative"},
+    "colors": {"speaker_1": "#4c72b0", "speaker_2": "#dd8452", "narrative": "#55a868"},
+    "default_speaker": "speaker_1",
+    "speaker_1_cues": [],
+    "speaker_2_cues": [],
+    "narrative_starts_pattern": "^(Placeholder)",
+    "chapter_heading_prefix": null,
+    "chapter_heading_max_len": 400
+  },
+
+  "topic_modeling": {
+    "_comment": "Used by analysis_b_topics.py. One key per language code; extra_stopwords supplements load_stopwords(), keep_stopwords exempts specific words from removal.",
+    "en": {
+      "extra_stopwords": [],
+      "keep_stopwords": []
+    },
+    "fr": {
+      "extra_stopwords": []
+    }
+  }
+}

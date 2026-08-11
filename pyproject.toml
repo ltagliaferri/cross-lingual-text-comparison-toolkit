@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cross-lingual-toolkit"
+version = "0.1.0"
+description = "Config-driven pipeline for comparing texts across language boundaries via multilingual sentence embeddings"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [{name = "Lisa Tagliaferri"}]
+requires-python = ">=3.9"
+dependencies = [
+    "matplotlib>=3.5",
+    "numpy>=1.21",
+    "pandas>=1.3",
+    "scipy>=1.7",
+    "seaborn>=0.11",
+    "scikit-learn>=1.0",
+    "spacy>=3.4",
+    "stanza>=1.5",
+    "sentence-transformers>=2.2",
+    "umap-learn>=0.5",
+    "bertopic>=0.15",
+]
+
+[project.scripts]
+xlt-embed-corpus = "cross_lingual_toolkit.embed_corpus:main"
+xlt-term-frequency = "cross_lingual_toolkit.term_frequency:main"
+xlt-lexical-richness = "cross_lingual_toolkit.lexical_richness:main"
+xlt-speaker-segmentation = "cross_lingual_toolkit.speaker_segmentation:main"
+xlt-adjective-window = "cross_lingual_toolkit.adjective_window:main"
+xlt-dependency-parsing = "cross_lingual_toolkit.dependency_parsing:main"
+xlt-cross-corpus-frequency = "cross_lingual_toolkit.cross_corpus_frequency:main"
+xlt-cross-corpus-dependency = "cross_lingual_toolkit.cross_corpus_dependency:main"
+xlt-analysis-umap = "cross_lingual_toolkit.analysis_a_umap:main"
+xlt-analysis-topics = "cross_lingual_toolkit.analysis_b_topics:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
