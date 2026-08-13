@@ -24,11 +24,13 @@ dependencies = [
     "bertopic>=0.15",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
 [project.scripts]
 xlt-embed-corpus = "cross_lingual_toolkit.embed_corpus:main"
 xlt-term-frequency = "cross_lingual_toolkit.term_frequency:main"
 xlt-lexical-richness = "cross_lingual_toolkit.lexical_richness:main"
-xlt-speaker-segmentation = "cross_lingual_toolkit.speaker_segmentation:main"
 xlt-adjective-window = "cross_lingual_toolkit.adjective_window:main"
 xlt-dependency-parsing = "cross_lingual_toolkit.dependency_parsing:main"
 xlt-cross-corpus-frequency = "cross_lingual_toolkit.cross_corpus_frequency:main"
@@ -38,3 +40,7 @@ xlt-analysis-topics = "cross_lingual_toolkit.analysis_b_topics:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

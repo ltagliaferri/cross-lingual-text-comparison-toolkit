@@ -208,7 +208,7 @@ def tokenize(text, remove_stopwords=True, stopwords=None, keep_short=None):
     Returns list of tokens.
     """
     text = text.lower()
-    # split elisions: "l'anima" -> "l anima"
+    # split elisions: "l'amico" -> "l amico"
     text = re.sub(r"[''']", ' ', text)
     # remove punctuation except hyphens within words
     text = re.sub(r'[^\w\s]', ' ', text, flags=re.UNICODE)

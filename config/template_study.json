@@ -134,19 +134,6 @@
     }
   },
 
-  "speaker_segmentation": {
-    "_comment": "Used by speaker_segmentation.py — only meaningful for a dialogic single_file corpus with a consistent attribution convention. Read the module docstring in src/speaker_segmentation.py before configuring this: the segmentation rules are tuned for a specific dialogue-formatting convention and will likely need code changes, not just config, for a different one.",
-    "corpus": "author_a_work",
-    "speaker_labels": {"speaker_1": "Speaker 1", "speaker_2": "Speaker 2", "narrative": "Narrative"},
-    "colors": {"speaker_1": "#4c72b0", "speaker_2": "#dd8452", "narrative": "#55a868"},
-    "default_speaker": "speaker_1",
-    "speaker_1_cues": [],
-    "speaker_2_cues": [],
-    "narrative_starts_pattern": "^(Placeholder)",
-    "chapter_heading_prefix": null,
-    "chapter_heading_max_len": 400
-  },
-
   "topic_modeling": {
     "_comment": "Used by analysis_b_topics.py. One key per language code; extra_stopwords supplements load_stopwords(), keep_stopwords exempts specific words from removal.",
     "en": {

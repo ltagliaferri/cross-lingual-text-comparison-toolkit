@@ -41,7 +41,6 @@ at the repo root (gitignored).
 | `embed_corpus.py` | `xlt-embed-corpus` | Builds chunked corpus JSON + cached embeddings for every corpus in the config — run first |
 | `term_frequency.py` | `xlt-term-frequency` | Normalized frequency of configured term clusters: single work vs. dated collection |
 | `lexical_richness.py` | `xlt-lexical-richness` | Type-token ratio and MATTR (moving-average TTR) |
-| `speaker_segmentation.py` | `xlt-speaker-segmentation` | State-machine segmentation of an alternating-speaker dialogic text |
 | `adjective_window.py` | `xlt-adjective-window` | Adjectives co-occurring within a token window of configured anchor terms (spaCy) |
 | `dependency_parsing.py` | `xlt-dependency-parsing` | Dependency-parse patterns around configured agents/verbs (spaCy) |
 | `cross_corpus_frequency.py` | `xlt-cross-corpus-frequency` | Bilingual concept-cluster frequency + Dunning log-likelihood across languages |
@@ -90,9 +89,8 @@ Top-level keys:
   rather than guess).
 - `term_frequency_clusters`, `adjective_anchor_terms`, `dependency_agents`,
   `cross_corpus_concept_clusters`, `cross_corpus_dependency`,
-  `speaker_segmentation`, `topic_modeling` — the domain-specific term lists
-  each script needs. All keys inside these are your own vocabulary, not
-  fixed categories.
+  `topic_modeling` — the domain-specific term lists each script needs. All
+  keys inside these are your own vocabulary, not fixed categories.
 - `colors`, `chunking`, `embedding_model`, `output` — cosmetic/pipeline
   defaults.
 
@@ -188,6 +186,18 @@ Without installing, run any module directly instead:
 
 Each script writes to `results/` (CSV/text) and `visualizations/` (PNG) at
 the repo root.
+
+## Tests
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+Covers the corpus-independent logic — tokenization, config loading,
+chunking, Dunning G², TTR/MATTR, dependency-window helpers — with small
+synthetic inputs, not real corpus
+data or downloaded spaCy/Stanza models.
 
 ## License
 
