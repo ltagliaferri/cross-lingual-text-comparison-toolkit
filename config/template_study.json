@@ -1,9 +1,11 @@
 {
-  "_comment": "Template study config. Copy this file, rename it, and fill in your own corpus — pass it via --config. Required sections: languages, corpora, study, embedding_model, chunking, output. Everything after '_optional_sections_comment' is only read by specific scripts; delete sections for scripts you won't run. Language codes are your own choice (see README's Config section, 'Language codes') — this template uses 'en'/'fr' as illustrative placeholders only, not a requirement.",
+  "_comment": "Template study config. Copy this file, rename it, and fill in your own corpus — pass it via --config. Required sections: languages, corpora, study, embedding_model, chunking, output. Everything after '_optional_sections_comment' is only read by specific scripts; delete sections for scripts you won't run. Language codes are your own choice (see README's Config section, 'Language codes') — this template uses 'en'/'fr' as illustrative placeholders only, not a requirement. Any key starting with '_' is treated as a comment and skipped everywhere the toolkit iterates a section, so you can annotate your own config the same way.",
 
   "corpus_root": null,
 
   "output": {
+    "_comment": "Written under the working directory unless you set 'root' (or pass --output-root). Absolute paths are used as-is.",
+    "root": null,
     "results_dir": "results",
     "visualizations_dir": "visualizations",
     "embeddings_dir": "embeddings"
@@ -18,7 +20,7 @@
 
   "languages": {
     "en": {
-      "_comment": "spacy_model (+ optional spacy_model_fallback) is needed if this language is used with adjective_window.py or dependency_parsing.py, or as primary_language for cross_corpus_dependency.py. stanza_model is needed if this is your comparison_language. stopwords_file, keep_short_tokens, and adjective_suffixes are all optional tokenizer tuning — see README.",
+      "_comment": "spacy_model (+ optional spacy_model_fallback) is needed if this language is used with adjective_window.py or dependency_parsing.py, or as primary_language for cross_corpus_dependency.py. stanza_model is needed if this is your comparison_language. stopwords_file, keep_short_tokens, and adjective_suffixes are all optional tokenizer tuning — see README. stopwords_file is looked for next to this config file, under the working directory, then among the lists bundled with the package.",
       "spacy_model": "en_core_web_lg",
       "spacy_model_fallback": "en_core_web_sm",
       "stopwords_file": null,
@@ -26,7 +28,9 @@
       "adjective_suffixes": []
     },
     "fr": {
-      "stanza_model": "fr"
+      "_comment": "For cross_corpus_frequency.py, configure a stopwords_file for BOTH languages or for neither — removing stopwords from only one side biases the per-10k rates and Dunning scores.",
+      "stanza_model": "fr",
+      "stopwords_file": null
     }
   },
 
@@ -84,6 +88,17 @@
 
   "_optional_sections_comment": "Everything below is optional. Each section is read by exactly one script — delete a section if you won't run that script.",
 
+  "analysis": {
+    "_comment": "Used by analysis_a_umap.py.",
+    "n_permutations": 1000
+  },
+
+  "lexical_richness": {
+    "_comment": "Used by lexical_richness.py. mattr_window is in tokens; lower it for short texts, or the whole work collapses to a single TTR value. smoothing_window is in MATTR values.",
+    "mattr_window": 500,
+    "smoothing_window": 50
+  },
+
   "term_frequency_clusters": {
     "_comment": "Used by term_frequency.py. One entry per concept cluster; 'terms' are surface forms in primary_language to count together.",
     "example_cluster": {
@@ -92,13 +107,23 @@
     }
   },
 
+  "adjective_window": {
+    "_comment": "Used by adjective_window.py. window is the number of tokens on each side of an anchor term.",
+    "window": 10
+  },
+
   "adjective_anchor_terms": {
     "_comment": "Used by adjective_window.py. Each key is an anchor concept; its list is that concept's surface forms in primary_language.",
     "example_anchor": ["word1", "word2"]
   },
 
+  "dependency_parsing": {
+    "_comment": "Used by dependency_parsing.py. chunk_chars is how much text is fed to spaCy at once.",
+    "chunk_chars": 50000
+  },
+
   "dependency_agents": {
-    "_comment": "Used by dependency_parsing.py. role is a spaCy dependency label (e.g. 'nsubj', 'obj').",
+    "_comment": "Used by dependency_parsing.py. role is a dependency label (e.g. 'nsubj', 'obj'); passive and English-convention spellings (nsubjpass, nsubj:pass, dobj) are matched automatically.",
     "example_agent": {
       "label": "Example Agent",
       "lemmas": ["lemma1", "lemma2"],
@@ -121,6 +146,7 @@
     "agent_a_label": "Agent A",
     "agent_b_label": "Agent B",
     "window": 10,
+    "chunk_chars": 50000,
     "primary": {
       "agent_a_lemmas": ["lemma1"],
       "agent_b_lemmas": ["lemma2"],
@@ -135,7 +161,8 @@
   },
 
   "topic_modeling": {
-    "_comment": "Used by analysis_b_topics.py. One key per language code; extra_stopwords supplements load_stopwords(), keep_stopwords exempts specific words from removal.",
+    "_comment": "Used by analysis_b_topics.py. min_topic_size is the smallest number of chunks BERTopic will call a topic — lower it for small corpora. The remaining keys are language codes; extra_stopwords supplements load_stopwords(), keep_stopwords exempts specific words from removal.",
+    "min_topic_size": 8,
     "en": {
       "extra_stopwords": [],
       "keep_stopwords": []

@@ -3,8 +3,8 @@ Cross-corpus dependency parsing comparison between the study's primary
 corpus (spaCy) and its cross-lingual comparison corpus (Stanza).
 
 Compares two configured "agents" — arbitrary role names, e.g. a divine name
-and a first-person/reflexive term; the bundled example study uses them for
-God and the soul — plus the studied person's own name-forms in the
+and a first-person/reflexive term, e.g. a divine name and the soul — plus
+the studied person's own name-forms in the
 comparison corpus. Agent forms/lemmas are nested under
 config['cross_corpus_dependency']['primary'] (spaCy-side, keyed by lemma)
 and ['comparison'] (Stanza-side, keyed by surface form):
@@ -20,8 +20,9 @@ relevant anchor terms (not the full text) to keep processing time
 reasonable.
 
 Requires:
-  pip install stanza  (+ the comparison-language model, see config)
-  pip install spacy   (+ the primary-language model, see config)
+  pip install "cross-lingual-toolkit[parsing]"
+  + the Stanza model for the comparison language and the spaCy model for
+    the primary language (see config['languages'])
 
 Outputs:
   results/crossdep_agent_a_verbs.csv      – agent A's verbs, both corpora
@@ -43,14 +44,22 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from .corpus import (load_config, add_config_args, ensure_output_dirs,
+from .corpus import (add_config_args, ensure_output_dirs, load_config_from_args,
                     load_source_corpus, load_stopwords, load_spacy, corpus_label)
+from .metrics import dep_variants, top_shared_terms
 
 try:
     import stanza
     _STANZA_AVAILABLE = True
 except ImportError:
     _STANZA_AVAILABLE = False
+
+# Accept both annotation conventions, so this works with English spaCy
+# models (nsubjpass/dobj) as well as UD-trained ones (nsubj:pass/obj).
+NSUBJ_LABELS = dep_variants('nsubj')
+OBJ_LABELS   = dep_variants('obj')
+
+DEFAULT_CHUNK_CHARS = 50_000
 
 
 def sentences_containing(text, terms):
@@ -67,10 +76,10 @@ def sentences_containing(text, terms):
 
 
 def plot_comparison(counter_a, counter_b, label_a, label_b, title, path, n=12):
-    all_verbs = set(list(counter_a.keys())[:n] + list(counter_b.keys())[:n])
-    verbs = sorted(all_verbs,
-                   key=lambda v: counter_a.get(v, 0) + counter_b.get(v, 0),
-                   reverse=True)[:n]
+    verbs = top_shared_terms(counter_a, counter_b, n)
+    if not verbs:
+        print(f'  (nothing to plot for "{title}")')
+        return
     x = range(len(verbs))
     width = 0.35
     fig, ax = plt.subplots(figsize=(11, 6))
@@ -89,10 +98,7 @@ def plot_comparison(counter_a, counter_b, label_a, label_b, title, path, n=12):
 
 
 def save_csv(path, counter_a, counter_b, label_a, label_b, n=30):
-    all_items = set(list(counter_a.keys()) + list(counter_b.keys()))
-    rows = sorted(all_items,
-                  key=lambda v: counter_a.get(v, 0) + counter_b.get(v, 0),
-                  reverse=True)[:n]
+    rows = top_shared_terms(counter_a, counter_b, n)
     with open(path, 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
         w.writerow(['term', label_a, label_b])
@@ -114,27 +120,27 @@ def process_primary(nlp, text, cfg, stopwords):
     print('  Processing primary corpus with spaCy…')
     a_lemmas = set(cfg['primary']['agent_a_lemmas'])
     b_lemmas = set(cfg['primary']['agent_b_lemmas'])
-    window = cfg['window']
+    window = cfg.get('window', 10)
+    chunk = int(cfg.get('chunk_chars', DEFAULT_CHUNK_CHARS))
 
     a_verbs  = Counter()
     b_verbs  = Counter()
     b_obj    = Counter()
     b_adjs   = Counter()
 
-    chunk = 50_000
     for start in range(0, len(text), chunk):
         doc = nlp(text[start:start + chunk])
         for token in doc:
             lem = token.lemma_.lower()
 
-            if lem in a_lemmas and token.dep_ == 'nsubj':
+            if lem in a_lemmas and token.dep_ in NSUBJ_LABELS:
                 if token.head.pos_ in ('VERB', 'AUX'):
                     a_verbs[token.head.lemma_.lower()] += 1
 
             if lem in b_lemmas:
-                if token.dep_ == 'nsubj' and token.head.pos_ in ('VERB', 'AUX'):
+                if token.dep_ in NSUBJ_LABELS and token.head.pos_ in ('VERB', 'AUX'):
                     b_verbs[token.head.lemma_.lower()] += 1
-                if token.dep_ == 'obj' and token.head.pos_ in ('VERB', 'AUX'):
+                if token.dep_ in OBJ_LABELS and token.head.pos_ in ('VERB', 'AUX'):
                     b_obj[token.head.lemma_.lower()] += 1
 
         toks = [t for t in doc]
@@ -164,7 +170,7 @@ def process_comparison(nlp, text, cfg):
     a_forms    = {t.lower() for t in cfg['comparison']['agent_a_forms']}
     b_forms    = {t.lower() for t in cfg['comparison']['agent_b_forms']}
     name_forms = {t.lower() for t in cfg['comparison']['name_forms']}
-    window = cfg['window']
+    window = cfg.get('window', 10)
 
     a_verbs   = Counter()
     b_verbs   = Counter()
@@ -185,7 +191,7 @@ def process_comparison(nlp, text, cfg):
                 for word in words:
                     surf = word.text.lower()
 
-                    if surf in a_forms and word.deprel in ('nsubj', 'nsubj:pass'):
+                    if surf in a_forms and word.deprel in NSUBJ_LABELS:
                         head = next((w for w in words if w.id == word.head), None)
                         if head and head.upos in ('VERB', 'AUX'):
                             a_verbs[(head.lemma or head.text).lower()] += 1
@@ -193,10 +199,10 @@ def process_comparison(nlp, text, cfg):
                     if surf in b_forms:
                         head = next((w for w in words if w.id == word.head), None)
                         if head and head.upos in ('VERB', 'AUX'):
-                            if word.deprel in ('nsubj', 'nsubj:pass', 'obj'):
+                            if word.deprel in NSUBJ_LABELS | OBJ_LABELS:
                                 b_verbs[(head.lemma or head.text).lower()] += 1
 
-                    if surf in name_forms and word.deprel == 'obj':
+                    if surf in name_forms and word.deprel in OBJ_LABELS:
                         head = next((w for w in words if w.id == word.head), None)
                         if head and head.upos in ('VERB', 'AUX'):
                             name_obj[(head.lemma or head.text).lower()] += 1
@@ -243,7 +249,8 @@ def analyze(config):
         print(f'ERROR: {e}'); return
 
     if not _STANZA_AVAILABLE:
-        print('ERROR: stanza is required. Install with: pip install stanza')
+        print('ERROR: stanza is required. Install with: '
+              'pip install "cross-lingual-toolkit[parsing]"')
         return
 
     print('Loading Stanza pipeline…')
@@ -333,10 +340,7 @@ def analyze(config):
 
 def main():
     args = add_config_args().parse_args()
-    config = load_config(args.config)
-    if args.corpus_root:
-        config['corpus_root'] = args.corpus_root
-    analyze(config)
+    analyze(load_config_from_args(args))
 
 
 if __name__ == '__main__':

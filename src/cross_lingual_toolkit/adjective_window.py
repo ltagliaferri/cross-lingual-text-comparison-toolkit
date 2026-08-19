@@ -5,10 +5,11 @@ For each anchor term (config['adjective_anchor_terms']), finds all
 occurrences across the study's primary corpora (config['study']
 ['primary_corpora'], combined into one token stream) and collects the
 words within a window of ±N tokens. Uses spaCy to identify adjectives
-among those words.
+among those words. Window size comes from
+config['adjective_window']['window'] (default 10).
 
 Requires: spacy + a model for the primary language
-  pip install spacy
+  pip install "cross-lingual-toolkit[parsing]"
   python -m spacy download <model>   (see config['languages'])
 
 Outputs:
@@ -26,9 +27,12 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .corpus import (load_config, add_config_args, ensure_output_dirs,
-                    load_source_corpus, load_stopwords, tokenize, spacy_model_names,
-                    keep_short_tokens, adjective_suffixes)
+from .corpus import (add_config_args, config_entries, ensure_output_dirs,
+                    load_config_from_args, load_source_corpus, load_stopwords,
+                    tokenize, spacy_model_names, keep_short_tokens,
+                    adjective_suffixes)
+from .metrics import (collect_windows,                          # noqa: F401
+                      adjectives_from_window_heuristic)
 
 try:
     import spacy
@@ -36,10 +40,11 @@ try:
 except ImportError:
     _SPACY_AVAILABLE = False
 
-WINDOW_SIZE = 10   # tokens on each side of the anchor
+DEFAULT_WINDOW_SIZE = 10   # tokens on each side of the anchor
+SPACY_BATCH_SIZE = 256
 
 
-def load_full_corpus(config, stopwords, keep_short):
+def load_full_corpus(config, keep_short):
     """Return tokenized list of all study primary_corpora, combined."""
     tokens = []
     for corpus_id in config['study']['primary_corpora']:
@@ -54,52 +59,37 @@ def load_full_corpus(config, stopwords, keep_short):
     return tokens
 
 
-def collect_windows(tokens, anchor_forms, window=WINDOW_SIZE):
+def adjectives_from_windows_spacy(nlp, windows, stopwords):
     """
-    Return list of context-window token lists around each occurrence of
-    any form in `anchor_forms`.
+    Tag every context window in one batched pass and return the combined
+    adjective Counter. Batching through nlp.pipe rather than calling nlp()
+    per window matters: a real corpus produces thousands of windows.
     """
-    windows = []
-    for i, tok in enumerate(tokens):
-        if tok in anchor_forms:
-            left  = max(0, i - window)
-            right = min(len(tokens), i + window + 1)
-            ctx = tokens[left:i] + tokens[i + 1:right]
-            windows.append(ctx)
-    return windows
-
-
-def adjectives_from_window_spacy(nlp, window_tokens, stopwords):
-    """Tag tokens in a window list and return adjective Counter."""
-    text = ' '.join(window_tokens)
-    doc = nlp(text)
     counter = Counter()
-    for token in doc:
-        if token.pos_ == 'ADJ' and token.lemma_.lower() not in stopwords:
-            counter[token.lemma_.lower()] += 1
-    return counter
-
-
-def adjectives_from_window_heuristic(window_tokens, stopwords, suffixes):
-    """Fallback: count tokens matching configured adjective-suffix heuristics."""
-    counter = Counter()
-    if not suffixes:
-        return counter
-    for tok in window_tokens:
-        if tok in stopwords:
-            continue
-        if len(tok) > 4 and tok.endswith(suffixes):
-            counter[tok] += 1
+    texts = (' '.join(window_tokens) for window_tokens in windows)
+    # only POS/lemma is needed here, so skip the expensive components
+    for doc in nlp.pipe(texts, batch_size=SPACY_BATCH_SIZE,
+                        disable=['parser', 'ner']):
+        for token in doc:
+            if token.pos_ == 'ADJ' and token.lemma_.lower() not in stopwords:
+                counter[token.lemma_.lower()] += 1
     return counter
 
 
 def analyze(config):
     results_dir, viz_dir, _ = ensure_output_dirs(config)
-    anchor_terms = config['adjective_anchor_terms']
+    anchor_terms = config_entries(config['adjective_anchor_terms'])
+    window_size = int(config.get('adjective_window', {})
+                            .get('window', DEFAULT_WINDOW_SIZE))
     language = config['study']['primary_language']
     stopwords = load_stopwords(config, language)
     short_tokens = keep_short_tokens(config, language)
     suffixes = adjective_suffixes(config, language)
+
+    if not anchor_terms:
+        print('ERROR: config["adjective_anchor_terms"] defines no anchors '
+              '(keys starting with "_" are treated as comments).')
+        return
 
     nlp = None
     fallback_note = (f'Configure languages.{language}.adjective_suffixes in your '
@@ -107,37 +97,38 @@ def analyze(config):
                       else 'Falling back to configured suffix heuristic.')
     if _SPACY_AVAILABLE:
         primary, fallback = spacy_model_names(config, language)
-        try:
-            nlp = spacy.load(primary)
-            print(f'Using spaCy {primary} for POS tagging.')
-        except OSError:
+        for model in (primary, fallback):
+            if not model:
+                continue
             try:
-                nlp = spacy.load(fallback)
-                print(f'Using spaCy {fallback} for POS tagging.')
+                nlp = spacy.load(model)
+                print(f'Using spaCy {model} for POS tagging.')
+                break
             except OSError:
-                print(f'WARNING: spaCy model not found for "{language}". '
-                      f'Run: python -m spacy download {primary}\n{fallback_note}')
+                continue
+        if nlp is None:
+            print(f'WARNING: spaCy model not found for "{language}". '
+                  f'Run: python -m spacy download {primary}\n{fallback_note}')
     else:
-        print(f'WARNING: spaCy not installed. Run: pip install spacy\n{fallback_note}')
+        print('WARNING: spaCy not installed. Run: '
+              f'pip install "cross-lingual-toolkit[parsing]"\n{fallback_note}')
 
     print('Loading corpus…')
-    tokens = load_full_corpus(config, stopwords, short_tokens)
+    tokens = load_full_corpus(config, short_tokens)
     print(f'  Total tokens: {len(tokens):,}')
 
     anchor_results = {}   # anchor_key -> Counter of adjectives
 
     for anchor_key, anchor_forms in anchor_terms.items():
         print(f'  Analysing windows around "{anchor_key}"…')
-        windows = collect_windows(tokens, set(anchor_forms))
+        windows = collect_windows(tokens, set(anchor_forms), window=window_size)
         print(f'    {len(windows)} occurrences found')
 
-        combined_counter = Counter()
-        for window_tokens in windows:
-            if nlp:
-                combined_counter.update(
-                    adjectives_from_window_spacy(nlp, window_tokens, stopwords)
-                )
-            else:
+        if nlp:
+            combined_counter = adjectives_from_windows_spacy(nlp, windows, stopwords)
+        else:
+            combined_counter = Counter()
+            for window_tokens in windows:
                 combined_counter.update(
                     adjectives_from_window_heuristic(window_tokens, stopwords, suffixes)
                 )
@@ -164,7 +155,7 @@ def analyze(config):
         fig, ax = plt.subplots(figsize=(8, 5))
         ax.barh(list(words)[::-1], list(counts)[::-1], color='#4c72b0', alpha=0.85)
         ax.set_xlabel('Count in windows')
-        ax.set_title(f'Adjectives near "{anchor_key}" (window ±{WINDOW_SIZE})')
+        ax.set_title(f'Adjectives near "{anchor_key}" (window ±{window_size})')
         fig.tight_layout()
         p = os.path.join(viz_dir, f'adj_window_{anchor_key}.png')
         fig.savefig(p, dpi=150)
@@ -177,38 +168,38 @@ def analyze(config):
         all_adjs.update(counter)
     top_adjs = [w for w, _ in all_adjs.most_common(20)]
 
-    if top_adjs:
-        anchor_keys = list(anchor_terms.keys())
-        matrix = np.zeros((len(top_adjs), len(anchor_keys)))
-        for j, akey in enumerate(anchor_keys):
-            for i, adj in enumerate(top_adjs):
-                matrix[i, j] = anchor_results[akey].get(adj, 0)
+    if not top_adjs:
+        print('\nNo adjectives found in any anchor window — nothing to plot.')
+        return
 
-        col_max = matrix.max(axis=0, keepdims=True)
-        col_max[col_max == 0] = 1
-        matrix_norm = matrix / col_max
+    anchor_keys = list(anchor_terms.keys())
+    matrix = np.zeros((len(top_adjs), len(anchor_keys)))
+    for j, akey in enumerate(anchor_keys):
+        for i, adj in enumerate(top_adjs):
+            matrix[i, j] = anchor_results[akey].get(adj, 0)
 
-        fig, ax = plt.subplots(figsize=(13, 7))
-        im = ax.imshow(matrix_norm, aspect='auto', cmap='Blues')
-        ax.set_xticks(range(len(anchor_keys)))
-        ax.set_xticklabels(anchor_keys, rotation=45, ha='right')
-        ax.set_yticks(range(len(top_adjs)))
-        ax.set_yticklabels(top_adjs)
-        plt.colorbar(im, ax=ax, label='Normalized frequency')
-        ax.set_title('Adjective associations by anchor term (column-normalized)')
-        fig.tight_layout()
-        p = os.path.join(viz_dir, 'adj_window_heatmap.png')
-        fig.savefig(p, dpi=150)
-        plt.close(fig)
-        print(f'\nSaved {p}')
+    col_max = matrix.max(axis=0, keepdims=True)
+    col_max[col_max == 0] = 1
+    matrix_norm = matrix / col_max
+
+    fig, ax = plt.subplots(figsize=(13, 7))
+    im = ax.imshow(matrix_norm, aspect='auto', cmap='Blues')
+    ax.set_xticks(range(len(anchor_keys)))
+    ax.set_xticklabels(anchor_keys, rotation=45, ha='right')
+    ax.set_yticks(range(len(top_adjs)))
+    ax.set_yticklabels(top_adjs)
+    plt.colorbar(im, ax=ax, label='Normalized frequency')
+    ax.set_title('Adjective associations by anchor term (column-normalized)')
+    fig.tight_layout()
+    p = os.path.join(viz_dir, 'adj_window_heatmap.png')
+    fig.savefig(p, dpi=150)
+    plt.close(fig)
+    print(f'\nSaved {p}')
 
 
 def main():
     args = add_config_args().parse_args()
-    config = load_config(args.config)
-    if args.corpus_root:
-        config['corpus_root'] = args.corpus_root
-    analyze(config)
+    analyze(load_config_from_args(args))
 
 
 if __name__ == '__main__':

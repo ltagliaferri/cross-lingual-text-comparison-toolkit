@@ -25,7 +25,8 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 from scipy.stats import chi2
 
-from .corpus import load_config, add_config_args, ensure_output_dirs, corpus_label
+from .corpus import (add_config_args, config_entries, ensure_output_dirs,
+                     load_config_from_args, corpus_label)
 from .embed import load_embedded_corpora, mean_pairwise_sim, permutation_test
 
 
@@ -61,7 +62,8 @@ def run(config):
     results_dir, viz_dir, embed_dir = ensure_output_dirs(config)
     study = config['study']
     primary_id, comparison_id = study['single_work_corpus'], study['comparison_corpus']
-    corpus_ids = list(config['corpora'].keys())
+    corpus_ids = list(config_entries(config['corpora']).keys())
+    n_perm = int(config.get('analysis', {}).get('n_permutations', 1000))
     context_ids = [c for c in corpus_ids if c not in (primary_id, comparison_id)]
 
     print('Loading chunks and embeddings…')
@@ -86,7 +88,13 @@ def run(config):
 
     # --- UMAP (all configured corpora, for context) ---
     print('Running UMAP…')
-    import umap
+    try:
+        import umap
+    except ImportError:
+        raise ImportError(
+            'umap-learn is required for this analysis. Install it with: '
+            'pip install "cross-lingual-toolkit[embeddings]"'
+        )
     reducer = umap.UMAP(n_neighbors=15, min_dist=0.1,
                         metric='cosine', random_state=42)
     coords = reducer.fit_transform(all_emb)
@@ -184,8 +192,8 @@ def run(config):
     print(f'  Saved {csv_path}')
 
     # --- Permutation test (primary vs comparison) ---
-    print('Running permutation test (1000 permutations)…')
-    p_val = permutation_test(emb_primary, emb_comparison, n_perm=1000)
+    print(f'Running permutation test ({n_perm} permutations)…')
+    p_val = permutation_test(emb_primary, emb_comparison, n_perm=n_perm)
     report = (
         f"Permutation test: {primary_label} vs. {comparison_label}\n"
         f"  Note: check whether this is a cross-genre/cross-language/cross-mode comparison\n"
@@ -195,7 +203,7 @@ def run(config):
         f"{mean_pairwise_sim(emb_primary, emb_comparison):.4f}\n"
         f"  Observed gap: "
         f"{mean_pairwise_sim(emb_primary, emb_primary, same=True) - mean_pairwise_sim(emb_primary, emb_comparison):.4f}\n"
-        f"  p-value (1000 permutations): {p_val:.4f}\n"
+        f"  p-value ({n_perm} permutations): {p_val:.4f}\n"
     )
     print(report)
     txt_path = os.path.join(results_dir, 'a_permutation_test.txt')
@@ -206,10 +214,7 @@ def run(config):
 
 def main():
     args = add_config_args().parse_args()
-    config = load_config(args.config)
-    if args.corpus_root:
-        config['corpus_root'] = args.corpus_root
-    run(config)
+    run(load_config_from_args(args))
 
 
 if __name__ == '__main__':

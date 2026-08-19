@@ -10,6 +10,7 @@ TTR = unique tokens / total tokens (sensitive to text length).
 MATTR = mean TTR over a sliding window of fixed size (length-independent).
 
 Uses config['study']['collection_corpus'] and ['single_work_corpus'].
+Window sizes come from config['lexical_richness'] (see template config).
 
 Outputs:
   results/lexical_richness_collection.csv  – per-item TTR, token count, types
@@ -27,28 +28,24 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .corpus import (load_config, add_config_args, ensure_output_dirs,
+from .corpus import (add_config_args, ensure_output_dirs, load_config_from_args,
                     load_source_corpus, load_stopwords, tokenize, corpus_label,
                     keep_short_tokens)
+from .metrics import ttr, mattr   # noqa: F401  (re-exported for callers/tests)
 
-MATTR_WINDOW = 500   # tokens per MATTR window
-
-
-def ttr(tokens):
-    if not tokens:
-        return 0.0
-    return len(set(tokens)) / len(tokens)
+DEFAULT_MATTR_WINDOW = 500     # tokens per MATTR window
+DEFAULT_SMOOTHING_WINDOW = 50  # MATTR values per smoothing window
 
 
-def mattr(tokens, window=MATTR_WINDOW):
-    """Moving-average TTR: mean TTR over successive windows."""
-    if len(tokens) < window:
-        return ttr(tokens)
-    return [ttr(tokens[i:i + window]) for i in range(0, len(tokens) - window + 1)]
+def _settings(config):
+    cfg = config.get('lexical_richness', {})
+    return (int(cfg.get('mattr_window', DEFAULT_MATTR_WINDOW)),
+            int(cfg.get('smoothing_window', DEFAULT_SMOOTHING_WINDOW)))
 
 
 def analyze(config):
     results_dir, viz_dir, _ = ensure_output_dirs(config)
+    mattr_window, smoothing_window = _settings(config)
     study = config['study']
     collection_id, single_id = study['collection_corpus'], study['single_work_corpus']
     collection_label = corpus_label(config, collection_id)
@@ -77,6 +74,11 @@ def analyze(config):
             'unique_content': len(set(content_tokens)),
             'content_ttr':    round(ttr(content_tokens), 4),
         })
+
+    if not rows:
+        print(f'ERROR: {collection_label} contains no items — check the corpus '
+              'path and, for a collection, its "groups" list.')
+        return
 
     csv_path = os.path.join(results_dir, 'lexical_richness_collection.csv')
     fieldnames = ['group', 'group_num', 'item_num', 'total_tokens',
@@ -135,7 +137,11 @@ def analyze(config):
     print(f'Computing {single_label} MATTR…')
     single_tokens = tokenize(load_source_corpus(config, single_id), remove_stopwords=False,
                              keep_short=single_short)
-    mattr_vals = mattr(single_tokens, window=MATTR_WINDOW)
+    if len(single_tokens) < mattr_window:
+        print(f'  NOTE: {single_label} has {len(single_tokens)} tokens, fewer than the '
+              f'MATTR window of {mattr_window} — reporting a single whole-text TTR. '
+              'Lower lexical_richness.mattr_window in your config for short texts.')
+    mattr_vals = mattr(single_tokens, window=mattr_window)
 
     csv2 = os.path.join(results_dir, 'lexical_richness_single_work.csv')
     with open(csv2, 'w', newline='', encoding='utf-8') as f:
@@ -145,15 +151,19 @@ def analyze(config):
             writer.writerow([i, round(val, 4)])
     print(f'  Saved {csv2}')
 
-    window_size = 50
-    smoothed = np.convolve(mattr_vals, np.ones(window_size) / window_size, mode='valid')
-
     fig, ax = plt.subplots(figsize=(12, 5))
     ax.plot(mattr_vals, alpha=0.25, color='steelblue', linewidth=0.8, label='Raw MATTR')
-    offset = window_size // 2
-    ax.plot(range(offset, offset + len(smoothed)), smoothed,
-            color='steelblue', linewidth=2, label=f'{window_size}-window smoothed')
-    ax.set_xlabel(f'Token position (window size = {MATTR_WINDOW})')
+    # Smoothing needs at least one full window of MATTR values; with a
+    # short text there may be only a handful (or one), so skip it.
+    if len(mattr_vals) >= smoothing_window:
+        smoothed = np.convolve(mattr_vals,
+                               np.ones(smoothing_window) / smoothing_window,
+                               mode='valid')
+        offset = smoothing_window // 2
+        ax.plot(range(offset, offset + len(smoothed)), smoothed,
+                color='steelblue', linewidth=2,
+                label=f'{smoothing_window}-window smoothed')
+    ax.set_xlabel(f'Token position (window size = {mattr_window})')
     ax.set_ylabel('TTR within window')
     ax.set_title(f'Lexical richness across the {single_label} (MATTR)')
     ax.legend()
@@ -174,10 +184,7 @@ def analyze(config):
 
 def main():
     args = add_config_args().parse_args()
-    config = load_config(args.config)
-    if args.corpus_root:
-        config['corpus_root'] = args.corpus_root
-    analyze(config)
+    analyze(load_config_from_args(args))
 
 
 if __name__ == '__main__':
