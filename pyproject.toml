@@ -10,22 +10,40 @@ readme = "README.md"
 license = {file = "LICENSE"}
 authors = [{name = "Lisa Tagliaferri"}]
 requires-python = ">=3.9"
+
+# Core: what every script needs. The heavy model stacks are extras, so
+# running one frequency analysis does not mean installing torch.
 dependencies = [
     "matplotlib>=3.5",
     "numpy>=1.21",
-    "pandas>=1.3",
     "scipy>=1.7",
-    "seaborn>=0.11",
     "scikit-learn>=1.0",
-    "spacy>=3.4",
-    "stanza>=1.5",
-    "sentence-transformers>=2.2",
-    "umap-learn>=0.5",
-    "bertopic>=0.15",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+# xlt-embed-corpus, xlt-analysis-umap
+embeddings = [
+    "sentence-transformers>=2.2",
+    "umap-learn>=0.5",
+]
+# xlt-adjective-window, xlt-dependency-parsing, xlt-cross-corpus-dependency
+parsing = [
+    "spacy>=3.4",
+    "stanza>=1.5",
+]
+# xlt-analysis-topics
+topics = [
+    "bertopic>=0.15",
+    "pandas>=1.3",
+    "seaborn>=0.11",
+]
+all = [
+    "cross-lingual-toolkit[embeddings,parsing,topics]",
+]
+dev = [
+    "cross-lingual-toolkit[all]",
+    "pytest>=7.0",
+]
 
 [project.scripts]
 xlt-embed-corpus = "cross_lingual_toolkit.embed_corpus:main"
@@ -40,6 +58,11 @@ xlt-analysis-topics = "cross_lingual_toolkit.analysis_b_topics:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The example stopword lists ship with the package, so a non-editable
+# install can still resolve a configured stopwords_file.
+[tool.setuptools.package-data]
+cross_lingual_toolkit = ["stopwords/*.txt"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
