@@ -9,6 +9,12 @@ of surface forms in each language that express the same concepts.
 Frequencies are normalized per 10,000 tokens and Dunning G² scores
 identify which clusters each corpus emphasizes.
 
+Both corpora are tokenized identically — same tokenizer, and each side's
+own configured stopword list removed — so the per-10k rates and the G²
+scores are computed over comparable denominators. Configure a
+stopwords_file for BOTH languages, or for neither; removing stopwords
+from only one side biases every number toward that corpus.
+
 Outputs:
   results/cross_freq_comparison.csv    – cluster frequencies per 10k, both corpora
   results/cross_dunning_clusters.csv   – Dunning G² scores per cluster
@@ -17,71 +23,26 @@ Outputs:
 """
 
 import os
-import re
 import csv
-import math
-from collections import Counter
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .corpus import (load_config, add_config_args, ensure_output_dirs,
-                    load_source_corpus, load_stopwords, tokenize, corpus_label,
-                    keep_short_tokens)
+from .corpus import (add_config_args, config_entries, ensure_output_dirs,
+                    load_config_from_args, load_source_corpus, load_stopwords,
+                    tokenize, corpus_label, keep_short_tokens)
+from .metrics import (count_cluster_forms as count_clusters,   # noqa: F401
+                      dunning_g2, normalize)
 
 # Each cluster entry in config['cross_corpus_concept_clusters'] is keyed by
 # language code (e.g. 'it'/'la'), matching config['corpora'][...]['language'].
 
 
-def dunning_g2(a, b, total_a, total_b):
-    """
-    Return signed G² for a term with count `a` in corpus A (size total_a)
-    and count `b` in corpus B (size total_b).
-    Positive = over-represented in A; negative = over-represented in B.
-    """
-    if a == 0 and b == 0:
-        return 0.0
-    expected_a = total_a * (a + b) / (total_a + total_b)
-    expected_b = total_b * (a + b) / (total_a + total_b)
-
-    def term(observed, expected):
-        if observed == 0:
-            return 0.0
-        return observed * math.log(observed / expected)
-
-    g2 = 2 * (term(a, expected_a) + term(b, expected_b))
-    if a / total_a < b / total_b:
-        g2 = -g2
-    return g2
-
-
-def tokenize_generic(text):
-    """Lowercase, split on any non-letter character (Unicode-aware), return tokens >= 2 chars."""
-    text = text.lower()
-    return [t for t in re.split(r'[\W\d_]+', text, flags=re.UNICODE) if len(t) >= 2]
-
-
-def count_clusters(tokens, clusters, lang_key):
-    freq = Counter(tokens)
-    forms = {key: set(data[lang_key]) for key, data in clusters.items()}
-    counts = {key: 0 for key in clusters}
-    for tok in tokens:
-        for key, form_set in forms.items():
-            if tok in form_set:
-                counts[key] += 1
-                break
-    return counts
-
-
-def normalize(counts, total, per=10_000):
-    return {k: round(v / total * per, 2) for k, v in counts.items()}
-
-
 def analyze(config):
     results_dir, viz_dir, _ = ensure_output_dirs(config)
-    clusters = config['cross_corpus_concept_clusters']
+    clusters = config_entries(config['cross_corpus_concept_clusters'])
     study = config['study']
     primary_id, comparison_id = study['single_work_corpus'], study['comparison_corpus']
     primary_label     = corpus_label(config, primary_id)
@@ -100,23 +61,47 @@ def analyze(config):
     print(f'  {len(primary_tokens):,} raw tokens, {len(primary_content):,} content tokens')
 
     # --- Load comparison corpus ---
+    # Tokenized exactly like the primary corpus (same tokenizer, own
+    # stopword list) so the two denominators mean the same thing.
     print(f'Loading {comparison_label}…')
     comparison_lang = config['corpora'][comparison_id]['language']
+    comparison_stops = load_stopwords(config, comparison_lang)
+    comparison_short = keep_short_tokens(config, comparison_lang)
     comparison_text = load_source_corpus(config, comparison_id)
-    comparison_tokens = tokenize_generic(comparison_text)
-    comparison_counts = count_clusters(comparison_tokens, clusters, comparison_lang)
-    comparison_norm   = normalize(comparison_counts, len(comparison_tokens))
-    print(f'  {len(comparison_tokens):,} tokens')
+    comparison_tokens = tokenize(comparison_text, remove_stopwords=False,
+                                 keep_short=comparison_short)
+    comparison_content = tokenize(comparison_text, stopwords=comparison_stops,
+                                  keep_short=comparison_short)
+    comparison_counts = count_clusters(comparison_content, clusters, comparison_lang)
+    comparison_norm   = normalize(comparison_counts, len(comparison_content))
+    print(f'  {len(comparison_tokens):,} raw tokens, '
+          f'{len(comparison_content):,} content tokens')
+
+    if bool(primary_stops) != bool(comparison_stops):
+        with_list = primary_lang if primary_stops else comparison_lang
+        without   = comparison_lang if primary_stops else primary_lang
+        print(f'WARNING: "{with_list}" has a stopwords_file but "{without}" does not. '
+              'The two corpora are then normalized over different kinds of token '
+              'total, which biases the rates and G² scores. Configure a stopword '
+              'list for both languages, or for neither.')
+
+    if not primary_content or not comparison_content:
+        print('ERROR: one of the corpora tokenized to nothing — check paths and encodings.')
+        return
 
     cluster_keys   = list(clusters.keys())
     cluster_labels = [clusters[k]['label'] for k in cluster_keys]
+    if not cluster_keys:
+        print('ERROR: config["cross_corpus_concept_clusters"] defines no clusters '
+              '(keys starting with "_" are treated as comments).')
+        return
 
     # --- Dunning scores ---
     dunning = {}
     for key in cluster_keys:
         dunning[key] = dunning_g2(
             primary_counts[key], comparison_counts[key],
-            len(primary_content), len(comparison_tokens),
+            len(primary_content), len(comparison_content),
         )
 
     # --- Save CSVs ---
@@ -202,10 +187,7 @@ def analyze(config):
 
 def main():
     args = add_config_args().parse_args()
-    config = load_config(args.config)
-    if args.corpus_root:
-        config['corpus_root'] = args.corpus_root
-    analyze(config)
+    analyze(load_config_from_args(args))
 
 
 if __name__ == '__main__':

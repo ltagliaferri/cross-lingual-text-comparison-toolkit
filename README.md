@@ -19,24 +19,30 @@ historical-language one this toolkit was built for.
 
 ## What's included
 
-Just the pipeline code — no config, no corpus, no results/data, no
-figures. To use it, write a study config (see **Config** below) and
-supply your own corpus.
+The pipeline code, a config template to copy, and two example stopword
+lists — no corpus, no results, no figures. To use it, write a study
+config (see **Config** below) and supply your own corpus.
 
 ```
 cross-lingual-text-comparison-toolkit/
 ├── pyproject.toml
-└── src/
-    └── cross_lingual_toolkit/
-        └── *.py                    # the pipeline — see table below
+├── config/
+│   └── template_study.json         # copy this to start your own study
+├── src/
+│   └── cross_lingual_toolkit/
+│       ├── *.py                    # the pipeline — see table below
+│       └── stopwords/*.txt         # example lists, installed with the package
+└── tests/
 ```
 
 Running a script creates `results/`, `visualizations/`, and `embeddings/`
-at the repo root (gitignored).
+in the current working directory — pass `--output-root` to put them
+elsewhere.
 
 | Module | Installed command | Purpose |
 |---|---|---|
-| `corpus.py` | *(library, no CLI)* | Config-driven text loading, tokenization, stopwords |
+| `corpus.py` | *(library, no CLI)* | Config-driven text loading, tokenization, stopwords, config validation |
+| `metrics.py` | *(library, no CLI)* | Corpus-independent measures (TTR/MATTR, Dunning G², cluster counts, dependency-label variants) — no plotting or NLP imports |
 | `embed.py` | *(library, no CLI)* | Chunking, embedding, similarity/permutation-test helpers, embedded-corpus registry |
 | `embed_corpus.py` | `xlt-embed-corpus` | Builds chunked corpus JSON + cached embeddings for every corpus in the config — run first |
 | `term_frequency.py` | `xlt-term-frequency` | Normalized frequency of configured term clusters: single work vs. dated collection |
@@ -92,25 +98,48 @@ Top-level keys:
   `topic_modeling` — the domain-specific term lists each script needs. All
   keys inside these are your own vocabulary, not fixed categories.
 - `colors`, `chunking`, `embedding_model`, `output` — cosmetic/pipeline
-  defaults.
+  defaults. `output.root` (or `--output-root`) sets where `results/`,
+  `visualizations/` and `embeddings/` are written; by default that is the
+  working directory.
+- `analysis`, `lexical_richness`, `adjective_window`, `dependency_parsing`,
+  `topic_modeling` — per-script tuning that used to be hardcoded:
+  permutation count, MATTR window, context-window size, spaCy chunk size,
+  and BERTopic's `min_topic_size`. All optional, all with defaults.
 
-**Language codes:** pick a short code per language (the bundled example
-uses `it`/`la`; ISO 639-1 two-letter codes are a reasonable default, e.g.
-`en`, `fr`, `de`) and use it consistently everywhere a language is
-referenced: as a key in `languages`, as the value of `corpora[...]['language']`
-and `study['primary_language']`/`['comparison_language']`, and as a key
+**Comment keys:** any key starting with `_` is treated as an annotation
+and skipped wherever the toolkit iterates a section, so you can document
+your own config inline the way `template_study.json` does.
+
+**Config validation:** every script checks the config before doing any
+work — that the corpus ids named in `study` exist, that each corpus
+declares the keys the loaders need, and that the languages line up — and
+reports all the problems at once instead of failing partway through.
+
+**Language codes:** pick a short code per language (ISO 639-1 two-letter
+codes are a reasonable default, e.g. `en`, `fr`, `de`; the template config
+uses `en`/`fr` as placeholders) and use it consistently everywhere a
+language is referenced: as a key in `languages`, as the value of
+`corpora[...]['language']` and
+`study['primary_language']`/`['comparison_language']`, and as a key
 inside any per-language dict your own config adds (e.g.
-`cross_corpus_concept_clusters[cluster]['it']`/`['la']`, or
+`cross_corpus_concept_clusters[cluster]['en']`/`['fr']`, or
 `cross_corpus_dependency`'s `primary`/`comparison` sections, which are
 keyed by role rather than by code but still correspond 1:1 with
-`primary_language`/`comparison_language`). The scripts always look languages
-up by whatever code you chose — nothing is hardcoded to `it`/`la`.
+`primary_language`/`comparison_language`). The scripts always look
+languages up by whatever code you chose — no code is hardcoded anywhere.
 
 **Stopword lists:** plain text, one token per line — blank lines and lines
 starting with `#` are ignored, so you can group/comment them (see
-`stopwords/stopwords_it_medieval.txt` and `stopwords/stopwords_la.txt` for
-examples). Entirely optional: a language with no `stopwords_file`
-configured just gets an empty stopword set, not an error. If you already
+`src/cross_lingual_toolkit/stopwords/` for two examples, which install
+with the package and can be referenced by filename from any config).
+`stopwords_file` is looked for in a `stopwords/` directory next to your
+config file, then under the working directory, then among the bundled
+lists; an absolute path also works. Entirely optional: a language with no
+`stopwords_file` configured just gets an empty stopword set, not an
+error. One caveat for `cross_corpus_frequency.py`: configure a list for
+both languages or for neither, since removing stopwords from only one
+side of a cross-corpus comparison biases every rate and G² score toward
+that corpus (the script warns if you do). If you already
 have a spaCy model installed for your language, its built-in list is a
 reasonable starting point:
 ```python
@@ -118,9 +147,9 @@ import spacy
 print(sorted(spacy.load("en_core_web_sm").Defaults.stop_words))
 ```
 
-Every script accepts `--config path/to/your_study.json` and
+Every script accepts `--config path/to/your_study.json`,
 `--corpus-root path/to/corpus/root` (the directory containing the paths
-referenced in `corpora[...]['path']`).
+referenced in `corpora[...]['path']`), and `--output-root path/to/output`.
 
 ## Adding your own texts
 
@@ -156,12 +185,22 @@ referenced in `corpora[...]['path']`).
 
 ## Setup
 
+The core install is small — matplotlib, numpy, scipy, scikit-learn — and
+covers `term_frequency.py`, `lexical_richness.py` and
+`cross_corpus_frequency.py`. The model-heavy stacks are extras, so add
+only what your analysis needs:
+
 ```bash
-pip install -e .
+pip install -e .                  # core: frequency + lexical richness
+pip install -e ".[embeddings]"    # + embed_corpus, analysis_a_umap
+pip install -e ".[parsing]"       # + adjective_window, both dependency scripts
+pip install -e ".[topics]"        # + analysis_b_topics
+pip install -e ".[all]"           # everything
 ```
 
 (Editable install — recommended, since you'll likely be adapting the
-config/scripts to your own study. Drop `-e` for a plain install if not.)
+config/scripts to your own study. Drop `-e` for a plain install if not;
+outputs and stopword lists resolve the same way either way.)
 
 Then install whatever spaCy and/or Stanza models your config's
 `languages` section references, e.g.:
@@ -184,8 +223,8 @@ Without installing, run any module directly instead:
 `python -m cross_lingual_toolkit.embed_corpus --config ... --corpus-root ...`
 (from `src/`, or with `src/` on `PYTHONPATH`).
 
-Each script writes to `results/` (CSV/text) and `visualizations/` (PNG) at
-the repo root.
+Each script writes to `results/` (CSV/text) and `visualizations/` (PNG)
+under the working directory, or under `--output-root` if you pass one.
 
 ## Tests
 
@@ -194,10 +233,14 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Covers the corpus-independent logic — tokenization, config loading,
-chunking, Dunning G², TTR/MATTR, dependency-window helpers — with small
-synthetic inputs, not real corpus
-data or downloaded spaCy/Stanza models.
+Covers the corpus-independent logic — tokenization, config loading and
+validation, stopword resolution, chunking, Dunning G², TTR/MATTR,
+dependency-label and context-window helpers — plus end-to-end runs of the
+model-free analyses over a small synthetic two-language corpus. No real
+corpus data and no downloaded spaCy/Stanza models are involved.
+
+`tests/test_metrics.py` imports only `cross_lingual_toolkit.metrics`, so
+that half of the suite runs with nothing but `pytest` installed.
 
 ## License
 

@@ -9,7 +9,8 @@ one pair per corpus defined in config['corpora'].
 
 import os
 
-from .corpus import load_config, add_config_args, ensure_output_dirs, load_source_corpus, corpus_label
+from .corpus import (add_config_args, config_entries, ensure_output_dirs,
+                     load_config_from_args, load_source_corpus, corpus_label)
 from .embed import chunk_by_paragraph, save_corpus, get_model, embed_chunks
 
 
@@ -85,8 +86,11 @@ def run(config):
 
     print('=== Preparing corpus chunks ===')
     all_chunks = {}
-    for corpus_id in config['corpora']:
+    for corpus_id in config_entries(config['corpora']):
         chunks = prepare_corpus(config, corpus_id)
+        if not chunks:
+            print(f'  WARNING: {corpus_id} produced no chunks — its text may be '
+                  'shorter than chunking.min_chars, or the path may be wrong.')
         all_chunks[corpus_id] = chunks
         print(f'  {corpus_label(config, corpus_id):15s} ({corpus_id}): {len(chunks):4d} chunks')
     print(f'  Total: {sum(len(c) for c in all_chunks.values()):4d} chunks')
@@ -106,10 +110,7 @@ def run(config):
 
 def main():
     args = add_config_args().parse_args()
-    config = load_config(args.config)
-    if args.corpus_root:
-        config['corpus_root'] = args.corpus_root
-    run(config)
+    run(load_config_from_args(args))
 
 
 if __name__ == '__main__':

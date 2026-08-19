@@ -8,8 +8,13 @@ receive), as grammatical subject or object?
 Processes each of the study's primary corpora (config['study']
 ['primary_corpora']) separately.
 
+Dependency labels are matched across annotation conventions, so a config
+that says "nsubj"/"obj" works with both spaCy's English models
+(nsubjpass/dobj) and its UD-trained ones (nsubj:pass/obj) — see
+metrics.dep_variants().
+
 Requires: spacy + a model for the primary language
-  pip install spacy
+  pip install "cross-lingual-toolkit[parsing]"
   python -m spacy download <model>   (see config['languages'])
 
 Outputs:
@@ -25,9 +30,12 @@ from collections import Counter
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import numpy as np
 
-from .corpus import (load_config, add_config_args, ensure_output_dirs,
-                    load_source_corpus, load_spacy, corpus_label)
+from .corpus import (add_config_args, config_entries, ensure_output_dirs,
+                    load_config_from_args, load_source_corpus, load_spacy,
+                    corpus_label)
+from .metrics import dep_variants
 
 try:
     import spacy  # noqa: F401
@@ -35,23 +43,27 @@ try:
 except ImportError:
     _SPACY_AVAILABLE = False
 
+DEFAULT_CHUNK_CHARS = 50_000   # characters fed to spaCy at a time
+
 
 def extract_verbs(doc, agent_lemmas, dep_role):
     """
     Return Counter of verb lemmas where a token with a lemma in `agent_lemmas`
-    has the dependency relation `dep_role` to its head.
+    has the dependency relation `dep_role` to its head. Passive and
+    convention-specific spellings of the label are matched too.
     """
     counter = Counter()
+    roles = dep_variants(dep_role)
     for token in doc:
         if (token.lemma_.lower() in agent_lemmas and
-                token.dep_ in (dep_role, dep_role + 'pass')):
+                token.dep_ in roles):
             head = token.head
             if head.pos_ in ('VERB', 'AUX'):
                 counter[head.lemma_.lower()] += 1
     return counter
 
 
-def process_text(nlp, text, agents, chunk_size=50_000):
+def process_text(nlp, text, agents, chunk_size=DEFAULT_CHUNK_CHARS):
     """Process a large text in chunks and aggregate dependency counters."""
     agent_counters = {key: Counter() for key in agents}
 
@@ -64,6 +76,21 @@ def process_text(nlp, text, agents, chunk_size=50_000):
             )
 
     return agent_counters
+
+
+def agent_grid(n, cols=2):
+    """
+    Build a subplot grid for `n` agents and return (fig, flat axes array).
+
+    squeeze=False keeps the returned axes 2-D no matter the shape, so a
+    single agent yields one Axes rather than a bare ndarray the caller
+    would then try to call .set_title() on.
+    """
+    cols = max(1, min(cols, n))
+    rows = -(-n // cols)   # ceiling division
+    fig, axes = plt.subplots(rows, cols, figsize=(7 * cols, 5 * rows),
+                             squeeze=False)
+    return fig, np.asarray(axes).ravel()
 
 
 def plot_verbs(counter, title, path, top_n=15, color='#4c72b0'):
@@ -89,12 +116,19 @@ def corpus_text(config, corpus_id):
 
 def analyze(config):
     results_dir, viz_dir, _ = ensure_output_dirs(config)
-    agents = config['dependency_agents']
+    agents = config_entries(config['dependency_agents'])
     language = config['study']['primary_language']
+    chunk_chars = int(config.get('dependency_parsing', {})
+                            .get('chunk_chars', DEFAULT_CHUNK_CHARS))
+
+    if not agents:
+        print('ERROR: config["dependency_agents"] defines no agents '
+              '(keys starting with "_" are treated as comments).')
+        sys.exit(1)
 
     if not _SPACY_AVAILABLE:
         print('ERROR: spaCy is required for dependency parsing.\n'
-              'Install with: pip install spacy')
+              'Install with: pip install "cross-lingual-toolkit[parsing]"')
         sys.exit(1)
 
     try:
@@ -107,7 +141,7 @@ def analyze(config):
         label = corpus_label(config, corpus_id)
         text = corpus_text(config, corpus_id)
         print(f'\nProcessing {label} ({len(text):,} chars)…')
-        counters = process_text(nlp, text, agents)
+        counters = process_text(nlp, text, agents, chunk_size=chunk_chars)
 
         for key, cfg in agents.items():
             counter = counters[key]
@@ -127,11 +161,7 @@ def analyze(config):
             print(f'  Saved {p}')
 
         # Side-by-side subplot for this corpus
-        n = len(agents)
-        cols = 2
-        rows = (n + 1) // 2
-        fig, axes = plt.subplots(rows, cols, figsize=(14, 5 * rows))
-        axes_flat = axes.flat if n > 1 else [axes]
+        fig, axes_flat = agent_grid(len(agents))
         for ax, (key, cfg) in zip(axes_flat, agents.items()):
             top = counters[key].most_common(12)
             if top:
@@ -140,6 +170,9 @@ def analyze(config):
                         color=cfg.get('color', '#4c72b0'), alpha=0.85)
             ax.set_title(cfg['label'])
             ax.set_xlabel('Occurrences')
+        # a trailing odd agent leaves one empty cell in the grid
+        for ax in axes_flat[len(agents):]:
+            ax.set_visible(False)
 
         fig.suptitle(f'Verbal patterns by agent — {label}', fontsize=13)
         fig.tight_layout()
@@ -151,10 +184,7 @@ def analyze(config):
 
 def main():
     args = add_config_args().parse_args()
-    config = load_config(args.config)
-    if args.corpus_root:
-        config['corpus_root'] = args.corpus_root
-    analyze(config)
+    analyze(load_config_from_args(args))
 
 
 if __name__ == '__main__':

@@ -67,7 +67,13 @@ def load_embedded_corpora(embed_dir, corpus_ids: list[str]) -> dict:
 # ---------------------------------------------------------------------------
 
 def get_model(name: str = "sentence-transformers/LaBSE"):
-    from sentence_transformers import SentenceTransformer
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError:
+        raise ImportError(
+            'sentence-transformers is required to embed a corpus. Install it '
+            'with: pip install "cross-lingual-toolkit[embeddings]"'
+        )
     print(f"Loading model {name}…")
     return SentenceTransformer(name)
 

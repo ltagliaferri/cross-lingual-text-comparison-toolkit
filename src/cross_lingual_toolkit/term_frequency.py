@@ -5,8 +5,8 @@ Tracks clusters of study-specific terms (config['term_frequency_clusters'])
 and compares their normalized frequency (per 10,000 tokens) across the two
 works, and across the collection's groups (e.g. letter volumes).
 
-In the bundled example study this is the Dialogo vs. the Letters, grouped
-by volume.
+Both roles come from config['study']: single_work_corpus and
+collection_corpus.
 
 Outputs:
   results/term_frequency.csv           – raw and normalized counts per text
@@ -16,33 +16,21 @@ Outputs:
 
 import os
 import csv
-from collections import Counter
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .corpus import (load_config, add_config_args, ensure_output_dirs,
-                    load_source_corpus, load_stopwords, tokenize, corpus_label,
-                    keep_short_tokens)
-
-
-def count_clusters(tokens, clusters):
-    """Return dict {cluster_key: count} for a token list."""
-    freq = Counter(tokens)
-    return {key: sum(freq.get(t, 0) for t in data['terms'])
-            for key, data in clusters.items()}
-
-
-def normalize(counts, total_tokens, per=10_000):
-    """Normalize raw counts to frequency per `per` tokens."""
-    return {k: round(v / total_tokens * per, 2) for k, v in counts.items()}
+from .corpus import (add_config_args, config_entries, ensure_output_dirs,
+                    load_config_from_args, load_source_corpus, load_stopwords,
+                    tokenize, corpus_label, keep_short_tokens)
+from .metrics import count_cluster_terms as count_clusters, normalize   # noqa: F401
 
 
 def analyze(config):
     results_dir, viz_dir, _ = ensure_output_dirs(config)
-    clusters = config['term_frequency_clusters']
+    clusters = config_entries(config['term_frequency_clusters'])
     study = config['study']
     single_id, collection_id = study['single_work_corpus'], study['collection_corpus']
 
@@ -56,10 +44,18 @@ def analyze(config):
     single_label     = corpus_label(config, single_id)
     collection_label = corpus_label(config, collection_id)
 
+    if not clusters:
+        print('ERROR: config["term_frequency_clusters"] defines no clusters '
+              '(keys starting with "_" are treated as comments).')
+        return
+
     # --- Single work ---
     print(f'Loading {single_label}…')
     single_text   = load_source_corpus(config, single_id)
     single_tokens = tokenize(single_text, stopwords=single_stops, keep_short=single_short)
+    if not single_tokens:
+        print(f'ERROR: {single_label} tokenized to nothing — check its path and encoding.')
+        return
     single_counts = count_clusters(single_tokens, clusters)
     single_norm   = normalize(single_counts, len(single_tokens))
 
@@ -79,6 +75,11 @@ def analyze(config):
     for g, data in group_data.items():
         data['counts'] = count_clusters(data['tokens'], clusters)
         data['norm']   = normalize(data['counts'], len(data['tokens']))
+
+    if not all_collection_tokens:
+        print(f'ERROR: {collection_label} tokenized to nothing — check its path and, '
+              'for a collection, its "groups" list.')
+        return
 
     all_collection_counts = count_clusters(all_collection_tokens, clusters)
     all_collection_norm   = normalize(all_collection_counts, len(all_collection_tokens))
@@ -171,10 +172,7 @@ def analyze(config):
 
 def main():
     args = add_config_args().parse_args()
-    config = load_config(args.config)
-    if args.corpus_root:
-        config['corpus_root'] = args.corpus_root
-    analyze(config)
+    analyze(load_config_from_args(args))
 
 
 if __name__ == '__main__':
