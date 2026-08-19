@@ -15,3 +15,6 @@ venv/
 
 # Worked example config, kept locally for reference only.
 /config/study.json
+
+# Working notes, reviews, drafts — kept locally only.
+/notes/
