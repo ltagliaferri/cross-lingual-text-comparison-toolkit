@@ -1,10 +1,10 @@
 {
-  "_comment": "Template study config. Copy this file, rename it, and fill in your own corpus — pass it via --config. Required sections: languages, corpora, study, embedding_model, chunking, output. Everything after '_optional_sections_comment' is only read by specific scripts; delete sections for scripts you won't run. Language codes are your own choice (see README's Config section, 'Language codes') — this template uses 'en'/'fr' as illustrative placeholders only, not a requirement. Any key starting with '_' is treated as a comment and skipped everywhere the toolkit iterates a section, so you can annotate your own config the same way.",
+  "_comment": "Template study config. Copy this file, rename it, and fill in your own corpus — pass it via --config. Required: corpora, and study (the roles the scripts you run use — see README step 4). languages is needed for stopwords and spaCy/Stanza models. output, chunking, embedding_model (default sentence-transformers/LaBSE), analysis, lexical_richness and the other tuning sections are optional with defaults. Everything after '_optional_sections_comment' is only read by the script named in its _comment; delete sections for scripts you won't run (each script checks for the ones it needs). Language codes are your own choice (see README's Config section, 'Language codes') — this template uses 'en'/'fr' as illustrative placeholders only, not a requirement. Any key starting with '_' is treated as a comment and skipped everywhere the toolkit iterates a section, so you can annotate your own config the same way.",
 
   "corpus_root": null,
 
   "output": {
-    "_comment": "Written under the working directory unless you set 'root' (or pass --output-root). Absolute paths are used as-is.",
+    "_comment": "Written under the working directory unless you set 'root' or pass --output-root (--output-root wins over 'root'). Absolute paths are used as-is.",
     "root": null,
     "results_dir": "results",
     "visualizations_dir": "visualizations",
@@ -46,7 +46,7 @@
       "color": "#4c72b0"
     },
     "author_a_collection": {
-      "_comment": "For type 'collection': path is a directory containing one subdirectory per entry in 'groups', each holding .txt files (one file per dated/grouped item).",
+      "_comment": "For type 'collection': path is a directory containing one subdirectory per entry in 'groups', each holding .txt files (one file per dated/grouped item). Omit 'groups' if the .txt files sit directly in path. Group names label the plots and CSVs.",
       "label": "Author A's Collection",
       "author": "author_a",
       "work": "collection_id",
@@ -80,6 +80,7 @@
   "embedding_model": "sentence-transformers/LaBSE",
 
   "chunking": {
+    "_comment": "Chunks for embedding: paragraphs merged up to max_chars characters (longer paragraphs are split at sentences, then lines, then whitespace); min_chars only drops a whole text shorter than it (0 keeps everything); chunks of a longer text, the last included, can be shorter when a paragraph break and max_chars force a flush. Collection items shorter than collection_item_min_chars are skipped; items at or below collection_item_split_threshold are kept whole (so they can be longer than max_chars); longer items are chunked as above but with collection_item_min_chars in place of min_chars. Encoders truncate long input (LaBSE reads ~256 word-pieces), so lower max_chars for dense text.",
     "min_chars": 300,
     "max_chars": 1600,
     "collection_item_split_threshold": 1800,
@@ -89,18 +90,18 @@
   "_optional_sections_comment": "Everything below is optional. Each section is read by exactly one script — delete a section if you won't run that script.",
 
   "analysis": {
-    "_comment": "Used by analysis_a_umap.py.",
+    "_comment": "Used by analysis_a_umap.py. n_permutations shuffles for the permutation test (p is never below 1/(n_permutations+1)).",
     "n_permutations": 1000
   },
 
   "lexical_richness": {
-    "_comment": "Used by lexical_richness.py. mattr_window is in tokens; lower it for short texts, or the whole work collapses to a single TTR value. smoothing_window is in MATTR values.",
+    "_comment": "Used by lexical_richness.py. mattr_window is in tokens; lower it for short texts, or the whole work collapses to a single TTR value. smoothing_window is in per-window TTR values. Both must be positive integers.",
     "mattr_window": 500,
     "smoothing_window": 50
   },
 
   "term_frequency_clusters": {
-    "_comment": "Used by term_frequency.py. One entry per concept cluster; 'terms' are surface forms in primary_language to count together.",
+    "_comment": "Used by term_frequency.py. One entry per concept cluster; 'terms' are surface forms in primary_language to count together (a list, matched case-insensitively). Clusters are counted independently, so a word may count toward several.",
     "example_cluster": {
       "label": "Example Cluster",
       "terms": ["word1", "word2"]
@@ -133,7 +134,7 @@
   },
 
   "cross_corpus_concept_clusters": {
-    "_comment": "Used by cross_corpus_frequency.py. Each cluster has one key per language code (must match your languages' codes) holding that language's surface/inflected forms for the same concept.",
+    "_comment": "Used by cross_corpus_frequency.py. Each cluster has one key per language code (must match your languages' codes) holding that language's surface/inflected forms for the same concept (both languages are required). A token counts toward the first cluster that lists it only.",
     "example_cluster": {
       "label": "Example Cluster",
       "en": ["word1", "word2"],
@@ -142,7 +143,7 @@
   },
 
   "cross_corpus_dependency": {
-    "_comment": "Used by cross_corpus_dependency.py. agent_a/agent_b are arbitrary role names — see README. 'primary' is spaCy-side (lemmas, primary_language); 'comparison' is Stanza-side (surface forms, comparison_language).",
+    "_comment": "Used by cross_corpus_dependency.py. agent_a/agent_b are arbitrary role names — see README. 'primary' is spaCy-side (lemmas, primary_language); 'comparison' is Stanza-side (surface forms, comparison_language), and needs languages[comparison_language].stanza_model.",
     "agent_a_label": "Agent A",
     "agent_b_label": "Agent B",
     "window": 10,

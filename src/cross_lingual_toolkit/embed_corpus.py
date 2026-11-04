@@ -9,9 +9,11 @@ one pair per corpus defined in config['corpora'].
 
 import os
 
-from .corpus import (add_config_args, config_entries, ensure_output_dirs,
-                     load_config_from_args, load_source_corpus, corpus_label)
+from .corpus import (config_entries, ensure_output_dirs, load_source_corpus,
+                     corpus_label, run_cli)
 from .embed import chunk_by_paragraph, save_corpus, get_model, embed_chunks
+
+DEFAULT_EMBEDDING_MODEL = 'sentence-transformers/LaBSE'
 
 
 # ---------------------------------------------------------------------------
@@ -23,8 +25,8 @@ def prepare_single_file(config, corpus_id):
     chunking = config.get('chunking', {})
     text = load_source_corpus(config, corpus_id)
     parts = chunk_by_paragraph(text,
-                               min_chars=chunking.get('min_chars', 300),
-                               max_chars=chunking.get('max_chars', 1600))
+                               min_chars=int(chunking.get('min_chars', 300)),
+                               max_chars=int(chunking.get('max_chars', 1600)))
     return [
         {
             'chunk_id': f'{corpus_id}_{i:04d}',
@@ -40,15 +42,21 @@ def prepare_single_file(config, corpus_id):
 def prepare_collection(config, corpus_id):
     entry = config['corpora'][corpus_id]
     chunking = config.get('chunking', {})
-    split_threshold = chunking.get('collection_item_split_threshold', 1800)
-    item_min_chars  = chunking.get('collection_item_min_chars', 200)
-    max_chars       = chunking.get('max_chars', 1600)
+    split_threshold = int(chunking.get('collection_item_split_threshold', 1800))
+    item_min_chars  = int(chunking.get('collection_item_min_chars', 200))
+    max_chars       = int(chunking.get('max_chars', 1600))
 
     items = load_source_corpus(config, corpus_id)
     chunks = []
+    skipped = 0
     for item in items:
         text = item['text'].strip()
         if not text:
+            continue
+        if len(text) < item_min_chars:
+            # too short to embed reliably; would add noise to the
+            # within-collection similarity and the UMAP
+            skipped += 1
             continue
         if len(text) > split_threshold:
             parts = chunk_by_paragraph(text, min_chars=item_min_chars, max_chars=max_chars)
@@ -65,6 +73,9 @@ def prepare_collection(config, corpus_id):
                 'item_num':  item['item_num'],
                 'text':      part,
             })
+    if skipped:
+        print(f'  {corpus_id}: skipped {skipped} item(s) shorter than '
+              f'chunking.collection_item_min_chars ({item_min_chars} characters)')
     return chunks
 
 
@@ -99,18 +110,22 @@ def run(config):
         save_corpus(chunks, os.path.join(embed_dir, f'{corpus_id}.json'))
     print('  Corpus JSON saved.')
 
-    print(f"\n=== Generating embeddings ({config['embedding_model']}) ===")
-    model = get_model(config['embedding_model'])
+    model_name = config.get('embedding_model') or DEFAULT_EMBEDDING_MODEL
+    print(f"\n=== Generating embeddings ({model_name}) ===")
+    model = get_model(model_name)
 
     for corpus_id, chunks in all_chunks.items():
-        embed_chunks(chunks, model, os.path.join(embed_dir, f'{corpus_id}.npy'))
+        embed_chunks(chunks, model, os.path.join(embed_dir, f'{corpus_id}.npy'),
+                     model_name=model_name)
 
     print('\nDone. Run the analysis scripts next.')
 
 
+REQUIRES = ('corpora',)
+
+
 def main():
-    args = add_config_args().parse_args()
-    run(load_config_from_args(args))
+    run_cli(run, require=REQUIRES)
 
 
 if __name__ == '__main__':

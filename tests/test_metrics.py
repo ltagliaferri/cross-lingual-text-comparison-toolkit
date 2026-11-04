@@ -198,3 +198,58 @@ def test_heuristic_skips_stopwords_and_short_tokens():
     )
     # "zzq" is too short (<=4 chars) to count; "wordzzq" is stopword-excluded
     assert counter == {}
+
+
+# ---------------------------------------------------------------------------
+# Reference values and regressions from the 0.1.0 review
+# ---------------------------------------------------------------------------
+
+from cross_lingual_toolkit.metrics import mattr_score, normalize_term  # noqa: E402
+
+
+def test_mattr_hand_worked_values():
+    # windows of 2 over a a b b: {a,a}=0.5, {a,b}=1.0, {b,b}=0.5
+    assert mattr(["a", "a", "b", "b"], 2) == approx([0.5, 1.0, 0.5])
+
+
+def test_mattr_score_is_the_mean_of_the_window_ttrs():
+    assert mattr_score(["a", "a", "b", "b"], 2) == approx(2 / 3)
+
+
+def test_mattr_score_of_a_text_shorter_than_the_window_is_its_ttr():
+    tokens = ["a", "b", "a"]
+    assert mattr_score(tokens, 10) == approx(ttr(tokens))
+
+
+def test_dunning_g2_reference_value():
+    # two-cell log-likelihood (Rayson & Garside 2000), worked by hand:
+    # E = 55 each side; 2 * (100 ln(100/55) + 10 ln(10/55)) = 85.47
+    assert dunning_g2(100, 10, 1000, 1000) == approx(85.47, abs=0.01)
+
+
+def test_dunning_g2_is_antisymmetric():
+    for a, b, x, y in [(100, 10, 1000, 1000), (3, 7, 500, 2000), (0, 5, 100, 100)]:
+        assert dunning_g2(a, b, x, y) == approx(-dunning_g2(b, a, y, x))
+
+
+def test_count_cluster_terms_matches_capitalised_config_terms():
+    assert count_cluster_terms(["fear"], {"c": {"terms": ["Fear"]}}) == {"c": 1}
+
+
+def test_count_cluster_forms_matches_capitalised_config_forms():
+    assert count_cluster_forms(["fear"], {"c": {"en": ["Fear"]}}, "en") == {"c": 1}
+
+
+def test_count_cluster_terms_counts_a_duplicated_term_once():
+    assert count_cluster_terms(["fear", "x"], {"c": {"terms": ["fear", "fear"]}}) == {"c": 1}
+
+
+def test_count_cluster_terms_matches_nfd_config_terms_to_nfc_tokens():
+    import unicodedata
+    nfd = unicodedata.normalize("NFD", "école")
+    assert count_cluster_terms(["école"], {"c": {"terms": [nfd]}}) == {"c": 1}
+
+
+def test_normalize_term_is_nfc_and_lowercase():
+    import unicodedata
+    assert normalize_term(unicodedata.normalize("NFD", "École")) == "école"

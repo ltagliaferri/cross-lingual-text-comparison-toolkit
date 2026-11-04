@@ -6,8 +6,12 @@ the study's single-work corpus and its cross-lingual comparison corpus
 Because the texts are in different languages, comparison operates on
 BILINGUAL CONCEPT CLUSTERS (config['cross_corpus_concept_clusters']): sets
 of surface forms in each language that express the same concepts.
-Frequencies are normalized per 10,000 tokens and Dunning G² scores
-identify which clusters each corpus emphasizes.
+Frequencies are normalized per 10,000 tokens and log-likelihood (G²)
+scores identify which clusters each corpus emphasizes. G² here is the
+two-cell form standard in corpus linguistics (Rayson & Garside 2000; see
+metrics.dunning_g2); compare it with chi-square, 1 df: 3.84 (p < .05),
+6.63 (p < .01), 10.83 (p < .001). A G² of exactly 0 (equal rates, or no
+occurrences on either side) is reported as favouring "neither".
 
 Both corpora are tokenized identically — same tokenizer, and each side's
 own configured stopword list removed — so the per-10k rates and the G²
@@ -30,14 +34,26 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .corpus import (add_config_args, config_entries, ensure_output_dirs,
-                    load_config_from_args, load_source_corpus, load_stopwords,
-                    tokenize, corpus_label, keep_short_tokens)
+from .corpus import (config_entries, ensure_output_dirs, load_source_corpus,
+                    load_stopwords, tokenize, corpus_label, keep_short_tokens,
+                    run_cli, warn_untokenizable)
 from .metrics import (count_cluster_forms as count_clusters,   # noqa: F401
                       dunning_g2, normalize)
 
 # Each cluster entry in config['cross_corpus_concept_clusters'] is keyed by
 # language code (e.g. 'it'/'la'), matching config['corpora'][...]['language'].
+
+TIE_LABEL = 'neither'
+TIE_COLOUR = '#999999'
+
+
+def favoured(g2, primary_label, comparison_label):
+    """Which corpus a signed G² favours; 'neither' for an exact tie (G² == 0)."""
+    if g2 > 0:
+        return primary_label
+    if g2 < 0:
+        return comparison_label
+    return TIE_LABEL
 
 
 def analyze(config):
@@ -87,14 +103,21 @@ def analyze(config):
 
     if not primary_content or not comparison_content:
         print('ERROR: one of the corpora tokenized to nothing — check paths and encodings.')
-        return
+        return 1
 
     cluster_keys   = list(clusters.keys())
     cluster_labels = [clusters[k]['label'] for k in cluster_keys]
     if not cluster_keys:
         print('ERROR: config["cross_corpus_concept_clusters"] defines no clusters '
               '(keys starting with "_" are treated as comments).')
-        return
+        return 1
+
+    for key in cluster_keys:
+        for lang, stops, short in ((primary_lang, primary_stops, primary_short),
+                                   (comparison_lang, comparison_stops, comparison_short)):
+            warn_untokenizable(clusters[key].get(lang, []),
+                               f'cross_corpus_concept_clusters["{key}"]["{lang}"]',
+                               stopwords=stops, keep_short=short)
 
     # --- Dunning scores ---
     dunning = {}
@@ -123,7 +146,7 @@ def analyze(config):
         w.writerow(['cluster', 'label', 'dunning_g2',
                     'favours', 'primary_per10k', 'comparison_per10k'])
         for key in sorted(cluster_keys, key=lambda k: -abs(dunning[k])):
-            favour = primary_label if dunning[key] > 0 else comparison_label
+            favour = favoured(dunning[key], primary_label, comparison_label)
             w.writerow([key, clusters[key]['label'],
                         round(dunning[key], 2), favour,
                         primary_norm[key], comparison_norm[key]])
@@ -153,7 +176,8 @@ def analyze(config):
     sorted_keys = sorted(cluster_keys, key=lambda k: dunning[k])
     scores      = [dunning[k] for k in sorted_keys]
     labels      = [clusters[k]['label'] for k in sorted_keys]
-    colours     = ['#4c72b0' if s > 0 else '#c44e52' for s in scores]
+    colours     = ['#4c72b0' if s > 0 else '#c44e52' if s < 0 else TIE_COLOUR
+                   for s in scores]
 
     fig, ax = plt.subplots(figsize=(9, 5))
     ax.hlines(range(len(sorted_keys)), 0, scores, color=colours, linewidth=2)
@@ -164,7 +188,7 @@ def analyze(config):
     ax.set_xlabel(f'Dunning G² (positive = {primary_label}; negative = {comparison_label})')
     ax.set_title(f'Cluster emphasis: {primary_label} vs. {comparison_label} (Dunning G²)')
     for i, (score, label) in enumerate(zip(scores, labels)):
-        side = primary_label if score > 0 else comparison_label
+        side = favoured(score, primary_label, comparison_label)
         ax.annotate(f'{side} ({abs(score):.0f})',
                     xy=(score, i), xytext=(5 if score > 0 else -5, 0),
                     textcoords='offset points',
@@ -179,15 +203,18 @@ def analyze(config):
     print(f'\n{"Cluster":25s}  {primary_label + "/10k":>13}  {comparison_label + "/10k":>13}  {"G²":>8}  Favours')
     print('-' * 78)
     for key in cluster_keys:
-        fav = primary_label if dunning[key] > 0 else comparison_label
+        fav = favoured(dunning[key], primary_label, comparison_label)
         print(f'{clusters[key]["label"]:25s}  '
               f'{primary_norm[key]:13.1f}  {comparison_norm[key]:13.1f}  '
               f'{dunning[key]:8.1f}  {fav}')
 
 
+REQUIRES = ('single_work_corpus:single_file', 'comparison_corpus:single_file',
+            'cross_corpus_concept_clusters')
+
+
 def main():
-    args = add_config_args().parse_args()
-    analyze(load_config_from_args(args))
+    run_cli(analyze, require=REQUIRES)
 
 
 if __name__ == '__main__':

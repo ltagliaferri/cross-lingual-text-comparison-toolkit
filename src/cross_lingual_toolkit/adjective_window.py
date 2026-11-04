@@ -27,10 +27,10 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .corpus import (add_config_args, config_entries, ensure_output_dirs,
-                    load_config_from_args, load_source_corpus, load_stopwords,
-                    tokenize, spacy_model_names, keep_short_tokens,
-                    adjective_suffixes)
+from .corpus import (config_entries, ensure_output_dirs, load_source_corpus,
+                    load_stopwords, tokenize, spacy_model_names, keep_short_tokens,
+                    adjective_suffixes, normalize_term, run_cli,
+                    warn_untokenizable)
 from .metrics import (collect_windows,                          # noqa: F401
                       adjectives_from_window_heuristic)
 
@@ -71,8 +71,9 @@ def adjectives_from_windows_spacy(nlp, windows, stopwords):
     for doc in nlp.pipe(texts, batch_size=SPACY_BATCH_SIZE,
                         disable=['parser', 'ner']):
         for token in doc:
-            if token.pos_ == 'ADJ' and token.lemma_.lower() not in stopwords:
-                counter[token.lemma_.lower()] += 1
+            lemma = normalize_term(token.lemma_)
+            if token.pos_ == 'ADJ' and lemma not in stopwords:
+                counter[lemma] += 1
     return counter
 
 
@@ -89,7 +90,13 @@ def analyze(config):
     if not anchor_terms:
         print('ERROR: config["adjective_anchor_terms"] defines no anchors '
               '(keys starting with "_" are treated as comments).')
-        return
+        return 1
+
+    # windows are collected over the full token stream (stopwords kept),
+    # so only splitting and the length filter can make an anchor unmatchable
+    for anchor_key, anchor_forms in anchor_terms.items():
+        warn_untokenizable(anchor_forms, f'adjective_anchor_terms["{anchor_key}"]',
+                           keep_short=short_tokens)
 
     nlp = None
     fallback_note = (f'Configure languages.{language}.adjective_suffixes in your '
@@ -121,7 +128,8 @@ def analyze(config):
 
     for anchor_key, anchor_forms in anchor_terms.items():
         print(f'  Analysing windows around "{anchor_key}"…')
-        windows = collect_windows(tokens, set(anchor_forms), window=window_size)
+        windows = collect_windows(tokens, {normalize_term(f) for f in anchor_forms},
+                                  window=window_size)
         print(f'    {len(windows)} occurrences found')
 
         if nlp:
@@ -197,9 +205,11 @@ def analyze(config):
     print(f'\nSaved {p}')
 
 
+REQUIRES = ('primary_corpora', 'primary_language', 'adjective_anchor_terms')
+
+
 def main():
-    args = add_config_args().parse_args()
-    analyze(load_config_from_args(args))
+    run_cli(analyze, require=REQUIRES)
 
 
 if __name__ == '__main__':

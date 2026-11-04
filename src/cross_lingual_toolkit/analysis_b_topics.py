@@ -28,8 +28,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from .corpus import (add_config_args, ensure_output_dirs,
-                     load_config_from_args, load_stopwords)
+from .corpus import ensure_output_dirs, load_stopwords, normalize_term, run_cli
 from .embed import load_embedded_corpora
 
 DEFAULT_MIN_TOPIC_SIZE = 8
@@ -42,10 +41,10 @@ def build_vectorizer_stopwords(config, languages):
     for lang in languages:
         base = load_stopwords(config, lang)
         lang_cfg = topic_cfg.get(lang) or {}
-        keep = set(lang_cfg.get('keep_stopwords', []))
+        keep = {normalize_term(w) for w in lang_cfg.get('keep_stopwords', [])}
         filtered = [w for w in base if w not in keep]
         all_stopwords.extend(filtered)
-        all_stopwords.extend(lang_cfg.get('extra_stopwords', []))
+        all_stopwords.extend(normalize_term(w) for w in lang_cfg.get('extra_stopwords', []))
     return all_stopwords
 
 
@@ -82,7 +81,7 @@ def run(config):
               f'{min_topic_size}. BERTopic cannot form a topic from this. '
               'Lower topic_modeling.min_topic_size, or use a larger corpus / '
               'smaller chunking.max_chars.')
-        return
+        return 1
 
     print(f'Running BERTopic on {len(texts)} chunks…')
     try:
@@ -199,9 +198,12 @@ def run(config):
                 print(f'  T{tid} (+{val:.3f}): {words}')
 
 
+REQUIRES = ('single_work_corpus', 'comparison_corpus')
+
+
 def main():
-    args = add_config_args().parse_args()
-    run(load_config_from_args(args))
+    # reads cached embeddings, not corpus files, so no path checks
+    run_cli(run, require=REQUIRES, check_paths=False)
 
 
 if __name__ == '__main__':

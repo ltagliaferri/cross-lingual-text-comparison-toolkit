@@ -356,3 +356,84 @@ def test_load_config_from_args_applies_path_overrides(tmp_path):
     cfg = corpus.load_config_from_args(args, validate=False)
     assert cfg["corpus_root"] == "/corpora"
     assert corpus.output_dirs(cfg)[0] == os.path.join("/out", "results")
+
+
+# ---------------------------------------------------------------------------
+# Hardening review 2: combining marks, BOMs, decode errors, --corpus-root
+# ---------------------------------------------------------------------------
+
+def test_tokenize_keeps_devanagari_vowel_signs_inside_the_word():
+    # नमस्ते: न म + virama (Mn) स + virama त + vowel sign e (Mn)
+    assert corpus.tokenize("नमस्ते दुनिया") == ["नमस्ते", "दुनिया"]
+
+
+def test_tokenize_keeps_arabic_diacritics_inside_the_word():
+    assert corpus.tokenize("كَتَبَ الوَلَدُ") == ["كَتَبَ", "الوَلَدُ"]
+
+
+def test_tokenize_keeps_turkish_dotted_capital_i():
+    # "İ".lower() is "i" + U+0307 COMBINING DOT ABOVE
+    tokens = corpus.tokenize("İstanbul")
+    assert len(tokens) == 1
+    assert tokens == [corpus.normalize_term("İstanbul")]
+    assert tokens[0].endswith("stanbul") and len(tokens[0]) == 9
+
+
+def test_tokenize_keeps_a_zwnj_compound_together():
+    assert corpus.tokenize("می‌خواهم") == ["می‌خواهم"]
+
+
+def test_tokenize_still_splits_on_digits_underscores_and_punctuation():
+    assert corpus.tokenize("mid-word 1300 foo_bar l'amico") == ["mid", "word", "foo", "bar", "amico"]
+
+
+def test_normalize_term_strips_surrounding_whitespace():
+    assert corpus.normalize_term("  Fear ") == "fear"
+
+
+def test_load_stopwords_skips_a_byte_order_mark(tmp_path):
+    sw = tmp_path / "sw.txt"
+    sw.write_bytes("﻿the\nand\n".encode("utf-8"))
+    cfg = {"languages": {"en": {"stopwords_file": str(sw)}}}
+    assert corpus.load_stopwords(cfg, "en") == {"the", "and"}
+
+
+def test_load_config_skips_a_byte_order_mark(tmp_path):
+    path = tmp_path / "study.json"
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps({"corpora": {}}).encode("utf-8"))
+    assert corpus.load_config(str(path))["corpora"] == {}
+
+
+def test_load_config_rejects_a_non_object(tmp_path):
+    path = tmp_path / "study.json"
+    path.write_text("[1, 2]", encoding="utf-8")
+    with pytest.raises(ValueError, match="JSON object"):
+        corpus.load_config(str(path))
+
+
+def test_non_utf8_corpus_file_error_names_the_file(tmp_path):
+    (tmp_path / "w.txt").write_bytes("caf\xe9".encode("latin-1"))
+    cfg = {"corpora": {"w": {"type": "single_file", "path": "w.txt"}}}
+    with pytest.raises(ValueError, match=r"w\.txt is not valid UTF-8"):
+        corpus.load_single_file_corpus(cfg, "w", corpus_root_override=str(tmp_path))
+
+
+def test_non_utf8_collection_item_error_names_the_file(tmp_path):
+    (tmp_path / "c").mkdir()
+    (tmp_path / "c" / "001.txt").write_bytes(b"\xff\xfe bad")
+    cfg = {"corpora": {"c": {"type": "collection", "path": "c"}}}
+    with pytest.raises(ValueError, match=r"001\.txt is not valid UTF-8"):
+        corpus.load_collection_corpus(cfg, "c", corpus_root_override=str(tmp_path))
+
+
+def test_empty_corpus_root_flag_is_an_error(tmp_path):
+    path = tmp_path / "study.json"
+    path.write_text(json.dumps({"corpora": {}}), encoding="utf-8")
+    args = corpus.add_config_args().parse_args(["--config", str(path), "--corpus-root", ""])
+    with pytest.raises(ValueError, match="--corpus-root"):
+        corpus.load_config_from_args(args, validate=False)
+
+
+def test_tokenize_removes_soft_hyphens():
+    from cross_lingual_toolkit.corpus import tokenize
+    assert tokenize("co\u00adoperate now", remove_stopwords=False) == ["cooperate", "now"]

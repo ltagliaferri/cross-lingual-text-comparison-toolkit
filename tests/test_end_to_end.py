@@ -173,3 +173,183 @@ def test_analyses_write_under_an_explicit_output_root(study, tmp_path):
     study["_output_root"] = str(out)
     term_frequency.analyze(study)
     assert os.path.exists(out / "results" / "term_frequency.csv")
+
+
+# ---------------------------------------------------------------------------
+# embed_corpus (model mocked)
+# ---------------------------------------------------------------------------
+
+def test_embed_corpus_defaults_to_labse(study, monkeypatch):
+    from cross_lingual_toolkit import embed_corpus
+    import numpy as np
+    study.pop("embedding_model", None)
+    calls = []
+    monkeypatch.setattr(embed_corpus, "get_model", lambda name: calls.append(name) or object())
+    monkeypatch.setattr(embed_corpus, "embed_chunks",
+                        lambda chunks, model, path, **kw: np.zeros((len(chunks), 2)))
+    embed_corpus.run(study)
+    assert calls == ["sentence-transformers/LaBSE"]
+
+
+def test_prepare_collection_skips_items_below_the_minimum_length(tmp_path, capsys):
+    from cross_lingual_toolkit import embed_corpus
+    (tmp_path / "c").mkdir()
+    (tmp_path / "c" / "1.txt").write_text("tiny", encoding="utf-8")
+    (tmp_path / "c" / "2.txt").write_text("A real letter. " * 27, encoding="utf-8")
+    config = {
+        "corpus_root": str(tmp_path),
+        "corpora": {"c": {"type": "collection", "path": "c", "author": "a",
+                          "work": "w", "language": "en"}},
+    }
+    chunks = embed_corpus.prepare_collection(config, "c")
+    assert len(chunks) == 1
+    assert chunks[0]["item_num"] == "2"
+    assert "skipped 1 item" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Figure inspection helpers
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def saved_figures(monkeypatch):
+    """Record every figure saved, keyed by file name."""
+    from matplotlib.figure import Figure
+    saved = {}
+    original = Figure.savefig
+
+    def spy(self, fname, *args, **kwargs):
+        result = original(self, fname, *args, **kwargs)
+        saved[os.path.basename(str(fname))] = self
+        return result
+
+    monkeypatch.setattr(Figure, "savefig", spy)
+    return saved
+
+
+def _tick_labels(ax):
+    return [t.get_text() for t in ax.get_xticklabels()]
+
+
+def _legend_labels(ax):
+    return [t.get_text() for t in ax.get_legend().get_texts()]
+
+
+def test_plots_label_groups_by_their_configured_names(study, tmp_path, saved_figures):
+    term_frequency.analyze(study)
+    ax = saved_figures["term_freq_volumes.png"].axes[0]
+    assert "Volume1" in _tick_labels(ax) and "Volume2" in _tick_labels(ax)
+
+    lexical_richness.analyze(study)
+    box_ax = saved_figures["ttr_by_group.png"].axes[0]
+    assert _tick_labels(box_ax) == ["Volume1", "Volume2"]
+    scatter_ax = saved_figures["ttr_scatter.png"].axes[0]
+    assert _legend_labels(scatter_ax) == ["Volume1", "Volume2"]
+
+
+def test_lexical_richness_boxplot_avoids_version_specific_label_kwargs(
+        study, tmp_path, monkeypatch, saved_figures):
+    # boxplot(tick_labels=...) only exists from matplotlib 3.9, labels=
+    # is deprecated there; pyproject allows >= 3.5
+    from matplotlib.axes import Axes
+    calls = []
+    original = Axes.boxplot
+
+    def spy(self, *args, **kwargs):
+        calls.append(kwargs)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "boxplot", spy)
+    lexical_richness.analyze(study)
+    assert calls
+    assert all("tick_labels" not in kw and "labels" not in kw for kw in calls)
+    assert _tick_labels(saved_figures["ttr_by_group.png"].axes[0]) == ["Volume1", "Volume2"]
+
+
+def test_lexical_richness_leaves_empty_items_out_of_the_statistics(study, tmp_path, capsys):
+    letters = tmp_path / "corpus" / "letters" / "Volume2"
+    (letters / "2.txt").write_text("", encoding="utf-8")
+    lexical_richness.analyze(study)
+
+    rows = _read_csv(tmp_path / "results" / "lexical_richness_collection.csv")
+    empty = [r for r in rows if r["group"] == "Volume2" and r["item_num"] == "2"]
+    assert len(empty) == 1
+    assert empty[0]["ttr"] == "" and empty[0]["content_ttr"] == ""
+
+    out = capsys.readouterr().out
+    assert "Skipped 1 item" in out
+    # Volume2's only real letter is all-distinct content words: TTR 1.0,
+    # and the empty file must not pull the mean to 0.5
+    volume2 = [line for line in out.splitlines() if line.strip().startswith("Volume2")][0]
+    assert "n=  1" in volume2 and "mean=1.000" in volume2
+
+
+def test_lexical_richness_prints_a_single_mattr_score(study, capsys):
+    lexical_richness.analyze(study)
+    assert "MATTR (window 20" in capsys.readouterr().out
+
+
+def test_term_frequency_leaves_an_empty_group_blank(study, tmp_path, saved_figures):
+    (tmp_path / "corpus" / "letters" / "Volume2" / "1.txt").write_text("", encoding="utf-8")
+    term_frequency.analyze(study)
+    rows = {r["text"]: r for r in _read_csv(tmp_path / "results" / "term_frequency.csv")}
+    assert rows["Volume2"]["total_tokens"] == "0"
+    assert rows["Volume2"]["light_per10k"] == ""
+    assert rows["Volume2"]["place_per10k"] == ""
+    assert float(rows["Volume1"]["light_per10k"]) > 0
+
+
+def test_term_frequency_warns_about_unmatchable_terms(study, capsys):
+    study["term_frequency_clusters"]["light"]["terms"] += ["l'amour", "the"]
+    term_frequency.analyze(study)
+    out = capsys.readouterr().out
+    assert "\"l'amour\" can never match" in out
+    assert '"the" can never match' in out
+    assert '"light" can never match' not in out
+
+
+def test_cross_corpus_frequency_exact_rates(study, tmp_path):
+    # By hand, from PRIMARY / COMPARISON above (single-character "a"/"y"
+    # and the digits drop out; stopwords from the fixture lists removed):
+    #   primary: 37 tokens - 7 "the", 2 "and", 2 "was" = 26 content tokens;
+    #            light 3 + warm 3 = 6
+    #   comparison: 20 tokens - 3 "el", 2 "la", 1 "una", 1 "era" = 13;
+    #            luz 2 + calida 2 = 4
+    cross_corpus_frequency.analyze(study)
+    rows = {r["cluster"]: r for r in
+            _read_csv(tmp_path / "results" / "cross_freq_comparison.csv")}
+    assert int(rows["light"]["primary_raw"]) == 6
+    assert float(rows["light"]["primary_per10k"]) == pytest.approx(2307.69)
+    assert int(rows["light"]["comparison_raw"]) == 4
+    assert float(rows["light"]["comparison_per10k"]) == pytest.approx(3076.92)
+
+
+def test_cross_corpus_frequency_credits_a_zero_g2_to_neither(study, tmp_path):
+    study["cross_corpus_concept_clusters"]["absent"] = {
+        "label": "Absent", "en": ["zebra"], "es": ["cebra"]}
+    cross_corpus_frequency.analyze(study)
+    rows = {r["cluster"]: r for r in
+            _read_csv(tmp_path / "results" / "cross_dunning_clusters.csv")}
+    assert float(rows["absent"]["dunning_g2"]) == 0
+    assert rows["absent"]["favours"] == "neither"
+
+
+def test_cross_corpus_frequency_matches_capitalised_forms(study, tmp_path):
+    study["cross_corpus_concept_clusters"]["light"]["en"] = ["Light", "WARM"]
+    cross_corpus_frequency.analyze(study)
+    rows = {r["cluster"]: r for r in
+            _read_csv(tmp_path / "results" / "cross_freq_comparison.csv")}
+    assert int(rows["light"]["primary_raw"]) == 6
+
+
+def test_an_analysis_error_path_exits_non_zero(study, tmp_path, monkeypatch, capsys):
+    # the comparison text tokenizes to nothing -> "ERROR: ..." and status 1
+    (tmp_path / "corpus" / "comparison.txt").write_text("1300, 1301.", encoding="utf-8")
+    config_path = tmp_path / "study2.json"
+    data = {k: v for k, v in study.items() if k != "_config_path"}
+    config_path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["x", "--config", str(config_path)])
+    with pytest.raises(SystemExit) as exc:
+        cross_corpus_frequency.main()
+    assert exc.value.code == 1
+    assert "ERROR:" in capsys.readouterr().out

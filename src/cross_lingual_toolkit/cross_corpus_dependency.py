@@ -9,7 +9,7 @@ comparison corpus. Agent forms/lemmas are nested under
 config['cross_corpus_dependency']['primary'] (spaCy-side, keyed by lemma)
 and ['comparison'] (Stanza-side, keyed by surface form):
   1. What verbs does agent A perform, in each corpus?
-  2. What verbs does agent B perform, in each corpus?
+  2. What verbs does agent B perform (as subject), in each corpus?
   3. What is done TO the studied person's name (as object) in the
      comparison corpus, vs. to agent B in the primary corpus?
   4. Adjectives near the studied person's name (comparison corpus) vs.
@@ -38,14 +38,16 @@ Outputs:
 import os
 import re
 import csv
+import unicodedata
 from collections import Counter
 
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from .corpus import (add_config_args, ensure_output_dirs, load_config_from_args,
-                    load_source_corpus, load_stopwords, load_spacy, corpus_label)
+from .corpus import (ensure_output_dirs, load_source_corpus, load_stopwords,
+                    load_spacy, corpus_label, normalize_term, run_cli,
+                    split_for_parser, WORD_MARKS)
 from .metrics import dep_variants, top_shared_terms
 
 try:
@@ -63,13 +65,21 @@ DEFAULT_CHUNK_CHARS = 50_000
 
 
 def sentences_containing(text, terms):
-    """Yield sentences (split on '.', '!', '?') containing any term in `terms`."""
+    """
+    Yield sentences (split on '.', '!', '?') containing any term in `terms`
+    as a whole word. Word edges are lookarounds on the tokenizer's word
+    characters rather than \\b, which treats a trailing vowel sign or
+    vowel point as a word edge and so misses terms that end in one.
+    """
     sentences = re.split(r'(?<=[.!?])\s+', text)
+    patterns = [re.compile(rf'(?<![\w{WORD_MARKS}]){re.escape(normalize_term(t))}'
+                           rf'(?![\w{WORD_MARKS}])')
+                for t in terms if normalize_term(t)]
     seen = set()
     for sent in sentences:
-        low = sent.lower()
-        if any(re.search(r'\b' + re.escape(t) + r'\b', low) for t in terms):
-            key = sent[:80]
+        low = normalize_term(sent)
+        if any(p.search(low) for p in patterns):
+            key = sent.strip()   # exact repeats only: shared openings are common
             if key not in seen:
                 seen.add(key)
                 yield sent
@@ -118,9 +128,9 @@ def process_primary(nlp, text, cfg, stopwords):
       - adjectives in window around agent B
     """
     print('  Processing primary corpus with spaCy…')
-    a_lemmas = set(cfg['primary']['agent_a_lemmas'])
-    b_lemmas = set(cfg['primary']['agent_b_lemmas'])
-    window = cfg.get('window', 10)
+    a_lemmas = {normalize_term(t) for t in cfg['primary']['agent_a_lemmas']}
+    b_lemmas = {normalize_term(t) for t in cfg['primary']['agent_b_lemmas']}
+    window = int(cfg.get('window', 10))
     chunk = int(cfg.get('chunk_chars', DEFAULT_CHUNK_CHARS))
 
     a_verbs  = Counter()
@@ -128,29 +138,31 @@ def process_primary(nlp, text, cfg, stopwords):
     b_obj    = Counter()
     b_adjs   = Counter()
 
-    for start in range(0, len(text), chunk):
-        doc = nlp(text[start:start + chunk])
+    # NFC like tokenize(), so decomposed accents match the configured forms
+    text = unicodedata.normalize('NFC', text)
+    for piece in split_for_parser(text, chunk):
+        doc = nlp(piece)
         for token in doc:
-            lem = token.lemma_.lower()
+            lem = normalize_term(token.lemma_)
 
             if lem in a_lemmas and token.dep_ in NSUBJ_LABELS:
                 if token.head.pos_ in ('VERB', 'AUX'):
-                    a_verbs[token.head.lemma_.lower()] += 1
+                    a_verbs[normalize_term(token.head.lemma_)] += 1
 
             if lem in b_lemmas:
                 if token.dep_ in NSUBJ_LABELS and token.head.pos_ in ('VERB', 'AUX'):
-                    b_verbs[token.head.lemma_.lower()] += 1
+                    b_verbs[normalize_term(token.head.lemma_)] += 1
                 if token.dep_ in OBJ_LABELS and token.head.pos_ in ('VERB', 'AUX'):
-                    b_obj[token.head.lemma_.lower()] += 1
+                    b_obj[normalize_term(token.head.lemma_)] += 1
 
         toks = [t for t in doc]
         for i, t in enumerate(toks):
-            if t.lemma_.lower() in b_lemmas:
+            if normalize_term(t.lemma_) in b_lemmas:
                 lo = max(0, i - window)
                 hi = min(len(toks), i + window + 1)
                 for w in toks[lo:i] + toks[i+1:hi]:
-                    if w.pos_ == 'ADJ' and w.lemma_.lower() not in stopwords:
-                        b_adjs[w.lemma_.lower()] += 1
+                    if w.pos_ == 'ADJ' and normalize_term(w.lemma_) not in stopwords:
+                        b_adjs[normalize_term(w.lemma_)] += 1
 
     return a_verbs, b_verbs, b_obj, b_adjs
 
@@ -162,15 +174,15 @@ def process_comparison(nlp, text, cfg):
     """
     Extract from the comparison corpus:
       - verbs where an agent-A form is nsubj
-      - verbs where an agent-B form is nsubj/obj
+      - verbs where an agent-B form is nsubj (like the primary side)
       - verbs where the studied person's name is obj
       - adjectives in window around the studied person's name
     """
     print('  Processing comparison corpus with Stanza (targeted sentences)…')
-    a_forms    = {t.lower() for t in cfg['comparison']['agent_a_forms']}
-    b_forms    = {t.lower() for t in cfg['comparison']['agent_b_forms']}
-    name_forms = {t.lower() for t in cfg['comparison']['name_forms']}
-    window = cfg.get('window', 10)
+    a_forms    = {normalize_term(t) for t in cfg['comparison']['agent_a_forms']}
+    b_forms    = {normalize_term(t) for t in cfg['comparison']['agent_b_forms']}
+    name_forms = {normalize_term(t) for t in cfg['comparison']['name_forms']}
+    window = int(cfg.get('window', 10))
 
     a_verbs   = Counter()
     b_verbs   = Counter()
@@ -189,32 +201,32 @@ def process_comparison(nlp, text, cfg):
             for sentence in doc.sentences:
                 words = sentence.words
                 for word in words:
-                    surf = word.text.lower()
+                    surf = normalize_term(word.text)
 
                     if surf in a_forms and word.deprel in NSUBJ_LABELS:
                         head = next((w for w in words if w.id == word.head), None)
                         if head and head.upos in ('VERB', 'AUX'):
-                            a_verbs[(head.lemma or head.text).lower()] += 1
+                            a_verbs[normalize_term(head.lemma or head.text)] += 1
 
-                    if surf in b_forms:
+                    if surf in b_forms and word.deprel in NSUBJ_LABELS:
                         head = next((w for w in words if w.id == word.head), None)
                         if head and head.upos in ('VERB', 'AUX'):
-                            if word.deprel in NSUBJ_LABELS | OBJ_LABELS:
-                                b_verbs[(head.lemma or head.text).lower()] += 1
+                            b_verbs[normalize_term(head.lemma or head.text)] += 1
 
                     if surf in name_forms and word.deprel in OBJ_LABELS:
                         head = next((w for w in words if w.id == word.head), None)
                         if head and head.upos in ('VERB', 'AUX'):
-                            name_obj[(head.lemma or head.text).lower()] += 1
+                            name_obj[normalize_term(head.lemma or head.text)] += 1
 
                 for i, word in enumerate(words):
-                    if word.text.lower() in name_forms:
+                    if normalize_term(word.text) in name_forms:
                         lo = max(0, i - window)
                         hi = min(len(words), i + window + 1)
                         for w in words[lo:i] + words[i+1:hi]:
                             if w.upos == 'ADJ':
-                                name_adjs[(w.lemma or w.text).lower()] += 1
+                                name_adjs[normalize_term(w.lemma or w.text)] += 1
 
+    text = unicodedata.normalize('NFC', text)   # see process_primary()
     for sent in sentences_containing(text, all_anchors):
         batch.append(sent)
         if len(batch) >= batch_size:
@@ -246,12 +258,12 @@ def analyze(config):
     try:
         nlp_primary = load_spacy(config, primary_lang)
     except OSError as e:
-        print(f'ERROR: {e}'); return
+        print(f'ERROR: {e}'); return 1
 
     if not _STANZA_AVAILABLE:
         print('ERROR: stanza is required. Install with: '
               'pip install "cross-lingual-toolkit[parsing]"')
-        return
+        return 1
 
     print('Loading Stanza pipeline…')
     stanza_model = config['languages'][comparison_lang]['stanza_model']
@@ -260,7 +272,7 @@ def analyze(config):
                                          processors='tokenize,lemma,pos,depparse',
                                          verbose=False)
     except Exception as e:
-        print(f'ERROR: {e}'); return
+        print(f'ERROR: {e}'); return 1
 
     primary_text    = load_source_corpus(config, primary_id)
     comparison_text = load_source_corpus(config, comparison_id)
@@ -299,9 +311,9 @@ def analyze(config):
 
     # --- Adjectives near agent B (primary) vs. the name (comparison) ---
     for term in cfg.get('primary', {}).get('adj_filter', []):
-        b_adjs_p.pop(term, None)
+        b_adjs_p.pop(normalize_term(term), None)
     for term in cfg.get('comparison', {}).get('adj_filter', []):
-        name_adjs_c.pop(term, None)
+        name_adjs_c.pop(normalize_term(term), None)
 
     save_csv(os.path.join(results_dir, 'crossdep_name_adj.csv'),
              b_adjs_p, name_adjs_c,
@@ -338,9 +350,12 @@ def analyze(config):
         print(f'  {w1}({c1}){" "*(33-len(w1)-len(str(c1)))}  {w2}({c2})')
 
 
+REQUIRES = ('single_work_corpus:single_file', 'comparison_corpus:single_file',
+            'cross_corpus_dependency')
+
+
 def main():
-    args = add_config_args().parse_args()
-    analyze(load_config_from_args(args))
+    run_cli(analyze, require=REQUIRES)
 
 
 if __name__ == '__main__':
