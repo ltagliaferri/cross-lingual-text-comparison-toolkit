@@ -9,7 +9,23 @@ keep working.
 """
 
 import math
+import unicodedata
 from collections import Counter
+
+
+def normalize_term(term):
+    """
+    Normalize a configured term, form, lemma or stopword the same way
+    tokenize() normalizes text: lowercase, then Unicode NFC. Applying this
+    to both sides of every comparison means "Fear" in a config matches
+    "fear" in a text, and a decomposed (NFD) "é" matches a composed one.
+    Lowercasing comes first so that case mappings which produce combining
+    marks (Turkish "İ" -> "i" + U+0307) are normalized too. Surrounding
+    whitespace is stripped, so " fear" in a config is "fear". Soft hyphens
+    (U+00AD, invisible line-break hints common in PDF- and HTML-extracted
+    text) are removed, so "co\u00adoperate" matches "cooperate".
+    """
+    return unicodedata.normalize('NFC', term.lower()).replace('\u00ad', '').strip()
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +55,16 @@ def mattr(tokens, window=500):
     return [ttr(tokens[i:i + window]) for i in range(0, len(tokens) - window + 1)]
 
 
+def mattr_score(tokens, window=500):
+    """
+    MATTR proper (Covington & McFall 2010): the mean of the per-window
+    TTRs that mattr() returns. A text shorter than the window gets its
+    whole-text TTR.
+    """
+    values = mattr(tokens, window)
+    return sum(values) / len(values)
+
+
 # ---------------------------------------------------------------------------
 # Frequency
 # ---------------------------------------------------------------------------
@@ -58,9 +84,12 @@ def count_cluster_terms(tokens, clusters):
     Count occurrences of each cluster's `terms` in `tokens`.
     Returns {cluster_key: count}. A token counted for one cluster is
     still available to others (clusters here are not mutually exclusive).
+
+    Terms are matched after normalize_term(), and each distinct term is
+    counted once even if a cluster lists it twice.
     """
     freq = Counter(tokens)
-    return {key: sum(freq.get(t, 0) for t in data['terms'])
+    return {key: sum(freq.get(t, 0) for t in {normalize_term(t) for t in data['terms']})
             for key, data in clusters.items()}
 
 
@@ -69,9 +98,10 @@ def count_cluster_forms(tokens, clusters, lang_key):
     Count occurrences of each cluster's `lang_key` surface forms in
     `tokens`. Unlike count_cluster_terms, a token is attributed to the
     first matching cluster only, so cluster counts sum to at most
-    len(tokens).
+    len(tokens). Forms are matched after normalize_term().
     """
-    forms = {key: set(data[lang_key]) for key, data in clusters.items()}
+    forms = {key: {normalize_term(f) for f in data[lang_key]}
+             for key, data in clusters.items()}
     counts = {key: 0 for key in clusters}
     for tok in tokens:
         for key, form_set in forms.items():
@@ -86,6 +116,15 @@ def dunning_g2(a, b, total_a, total_b):
     Return signed G² for a term with count `a` in corpus A (size total_a)
     and count `b` in corpus B (size total_b).
     Positive = over-represented in A; negative = over-represented in B.
+
+    This is the two-cell log-likelihood used in corpus linguistics
+    (Rayson & Garside 2000): it sums O·ln(O/E) over the term's two
+    observed counts only, not over all four cells of Dunning's (1993)
+    full 2x2 table, so it is slightly smaller than the full G² (100 vs. 10
+    in 1,000 tokens each gives 85.47 here, 89.76 for the full table).
+    Compare it against chi-square with 1 df: 3.84 (p < .05), 6.63
+    (p < .01), 10.83 (p < .001) — bearing in mind that tokens are not
+    independent and that testing many clusters inflates false positives.
 
     Both corpora must be non-empty; an empty corpus makes the comparison
     undefined and returns 0.0.

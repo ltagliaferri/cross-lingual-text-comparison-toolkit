@@ -23,8 +23,8 @@ Outputs:
 """
 
 import os
-import sys
 import csv
+import unicodedata
 from collections import Counter
 
 import matplotlib
@@ -32,9 +32,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .corpus import (add_config_args, config_entries, ensure_output_dirs,
-                    load_config_from_args, load_source_corpus, load_spacy,
-                    corpus_label)
+from .corpus import (config_entries, ensure_output_dirs, load_source_corpus,
+                    load_spacy, corpus_label, normalize_term, run_cli,
+                    split_for_parser)
 from .metrics import dep_variants
 
 try:
@@ -50,25 +50,32 @@ def extract_verbs(doc, agent_lemmas, dep_role):
     """
     Return Counter of verb lemmas where a token with a lemma in `agent_lemmas`
     has the dependency relation `dep_role` to its head. Passive and
-    convention-specific spellings of the label are matched too.
+    convention-specific spellings of the label are matched too. Lemmas
+    are compared after normalize_term(), so "God" matches "god".
     """
     counter = Counter()
     roles = dep_variants(dep_role)
+    agent_lemmas = {normalize_term(lemma) for lemma in agent_lemmas}
     for token in doc:
-        if (token.lemma_.lower() in agent_lemmas and
+        if (normalize_term(token.lemma_) in agent_lemmas and
                 token.dep_ in roles):
             head = token.head
             if head.pos_ in ('VERB', 'AUX'):
-                counter[head.lemma_.lower()] += 1
+                counter[normalize_term(head.lemma_)] += 1
     return counter
 
 
 def process_text(nlp, text, agents, chunk_size=DEFAULT_CHUNK_CHARS):
-    """Process a large text in chunks and aggregate dependency counters."""
+    """
+    Process a large text in pieces of at most `chunk_size` characters,
+    cut at paragraph/sentence/word boundaries (split_for_parser), and
+    aggregate dependency counters.
+    """
     agent_counters = {key: Counter() for key in agents}
 
-    for start in range(0, len(text), chunk_size):
-        chunk = text[start:start + chunk_size]
+    # NFC like tokenize(), so decomposed accents match the configured lemmas
+    text = unicodedata.normalize('NFC', text)
+    for chunk in split_for_parser(text, chunk_size):
         doc = nlp(chunk)
         for key, cfg in agents.items():
             agent_counters[key].update(
@@ -124,18 +131,18 @@ def analyze(config):
     if not agents:
         print('ERROR: config["dependency_agents"] defines no agents '
               '(keys starting with "_" are treated as comments).')
-        sys.exit(1)
+        return 1
 
     if not _SPACY_AVAILABLE:
         print('ERROR: spaCy is required for dependency parsing.\n'
               'Install with: pip install "cross-lingual-toolkit[parsing]"')
-        sys.exit(1)
+        return 1
 
     try:
         nlp = load_spacy(config, language)
     except OSError as e:
         print(f'ERROR: {e}')
-        sys.exit(1)
+        return 1
 
     for corpus_id in config['study']['primary_corpora']:
         label = corpus_label(config, corpus_id)
@@ -182,9 +189,11 @@ def analyze(config):
         print(f'  Saved {p}')
 
 
+REQUIRES = ('primary_corpora', 'primary_language', 'dependency_agents')
+
+
 def main():
-    args = add_config_args().parse_args()
-    analyze(load_config_from_args(args))
+    run_cli(analyze, require=REQUIRES)
 
 
 if __name__ == '__main__':

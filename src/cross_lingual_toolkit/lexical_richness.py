@@ -8,13 +8,17 @@ across the text.
 
 TTR = unique tokens / total tokens (sensitive to text length).
 MATTR = mean TTR over a sliding window of fixed size (length-independent).
+The single-work CSV's `mattr` column holds the per-window TTRs (one per
+window start); their mean, MATTR proper, is printed in the summary. The
+single-work windows keep stopwords, while the collection plots use
+content-word TTR, so the two are not directly comparable.
 
 Uses config['study']['collection_corpus'] and ['single_work_corpus'].
 Window sizes come from config['lexical_richness'] (see template config).
 
 Outputs:
   results/lexical_richness_collection.csv  – per-item TTR, token count, types
-  results/lexical_richness_single_work.csv – MATTR across single-work windows
+  results/lexical_richness_single_work.csv – per-window TTR across the single work
   visualizations/ttr_by_group.png          – box plot of TTR per group
   visualizations/ttr_scatter.png           – TTR vs. item length scatter
   visualizations/mattr_single_work.png     – MATTR rolling window across the work
@@ -28,10 +32,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .corpus import (add_config_args, ensure_output_dirs, load_config_from_args,
-                    load_source_corpus, load_stopwords, tokenize, corpus_label,
-                    keep_short_tokens)
-from .metrics import ttr, mattr   # noqa: F401  (re-exported for callers/tests)
+from .corpus import (ensure_output_dirs, load_source_corpus, load_stopwords,
+                    tokenize, corpus_label, keep_short_tokens, run_cli)
+from .metrics import ttr, mattr, mattr_score   # noqa: F401  (re-exported for callers/tests)
 
 DEFAULT_MATTR_WINDOW = 500     # tokens per MATTR window
 DEFAULT_SMOOTHING_WINDOW = 50  # MATTR values per smoothing window
@@ -69,16 +72,18 @@ def analyze(config):
             'item_num':       item['item_num'],
             'total_tokens':   len(tokens),
             'unique_tokens':  len(set(tokens)),
-            'ttr':            round(ttr(tokens), 4),
+            # TTR is undefined for an empty item: leave it blank rather
+            # than a 0.0 that would drag down the group statistics
+            'ttr':            round(ttr(tokens), 4) if tokens else '',
             'content_tokens': len(content_tokens),
             'unique_content': len(set(content_tokens)),
-            'content_ttr':    round(ttr(content_tokens), 4),
+            'content_ttr':    round(ttr(content_tokens), 4) if content_tokens else '',
         })
 
     if not rows:
         print(f'ERROR: {collection_label} contains no items — check the corpus '
               'path and, for a collection, its "groups" list.')
-        return
+        return 1
 
     csv_path = os.path.join(results_dir, 'lexical_richness_collection.csv')
     fieldnames = ['group', 'group_num', 'item_num', 'total_tokens',
@@ -90,16 +95,30 @@ def analyze(config):
         writer.writerows(rows)
     print(f'  Saved {csv_path}')
 
+    scored = [r for r in rows if r['content_tokens']]
+    skipped = len(rows) - len(scored)
+    if skipped:
+        print(f'  Skipped {skipped} item(s) with no content tokens (empty, or '
+              'only stopwords) in the plots and summary; their CSV TTR cells are blank.')
+    if not scored:
+        print(f'ERROR: every {collection_label} item is empty after tokenization.')
+        return 1
+
     # --- Box plot: TTR by group ---
-    group_nums = sorted(set(r['group_num'] for r in rows))
-    group_ttrs = {g: [r['content_ttr'] for r in rows if r['group_num'] == g]
+    group_nums = sorted(set(r['group_num'] for r in scored))
+    group_ttrs = {g: [r['content_ttr'] for r in scored if r['group_num'] == g]
                   for g in group_nums}
-    group_labels = [f'Group {g}' for g in group_nums]
+    group_names = {r['group_num']: r['group'] for r in rows}
+    group_label = {g: group_names.get(g) or f'Group {g}' for g in group_nums}
+    group_labels = [group_label[g] for g in group_nums]
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    bp = ax.boxplot([group_ttrs[g] for g in group_nums],
-                    tick_labels=group_labels, patch_artist=True,
+    # labels set via set_xticklabels: boxplot's label kwarg was renamed
+    # (labels -> tick_labels) in matplotlib 3.9, and we support >= 3.5
+    bp = ax.boxplot([group_ttrs[g] for g in group_nums], patch_artist=True,
                     medianprops={'color': 'black', 'linewidth': 2})
+    ax.set_xticks(range(1, len(group_nums) + 1))
+    ax.set_xticklabels(group_labels)
     colors = plt.cm.Set2.colors
     for patch, color in zip(bp['boxes'], colors):
         patch.set_facecolor(color)
@@ -117,10 +136,10 @@ def analyze(config):
     fig, ax = plt.subplots(figsize=(10, 6))
     colors_scatter = plt.cm.tab10.colors
     for i, g in enumerate(group_nums):
-        subset = [r for r in rows if r['group_num'] == g]
+        subset = [r for r in scored if r['group_num'] == g]
         xs = [r['content_tokens'] for r in subset]
         ys = [r['content_ttr']    for r in subset]
-        ax.scatter(xs, ys, label=f'Group {g}',
+        ax.scatter(xs, ys, label=group_label[g],
                    color=colors_scatter[i % len(colors_scatter)], alpha=0.7, s=40)
 
     ax.set_xlabel('Content token count')
@@ -152,7 +171,7 @@ def analyze(config):
     print(f'  Saved {csv2}')
 
     fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(mattr_vals, alpha=0.25, color='steelblue', linewidth=0.8, label='Raw MATTR')
+    ax.plot(mattr_vals, alpha=0.25, color='steelblue', linewidth=0.8, label='Per-window TTR')
     # Smoothing needs at least one full window of MATTR values; with a
     # short text there may be only a handful (or one), so skip it.
     if len(mattr_vals) >= smoothing_window:
@@ -164,7 +183,7 @@ def analyze(config):
                 color='steelblue', linewidth=2,
                 label=f'{smoothing_window}-window smoothed')
     ax.set_xlabel(f'Token position (window size = {mattr_window})')
-    ax.set_ylabel('TTR within window')
+    ax.set_ylabel('TTR within window (MATTR = mean of these)')
     ax.set_title(f'Lexical richness across the {single_label} (MATTR)')
     ax.legend()
     fig.tight_layout()
@@ -174,17 +193,21 @@ def analyze(config):
     print(f'  Saved {p3}')
 
     # --- Summary ---
+    print(f'\n{single_label} MATTR (window {mattr_window}, stopwords kept): '
+          f'{mattr_score(single_tokens, window=mattr_window):.4f}')
     print('\nPer-group summary (content-word TTR):')
     for g in group_nums:
         vals = group_ttrs[g]
-        print(f'  Group {g}  n={len(vals):3d}  '
+        print(f'  {group_label[g]}  n={len(vals):3d}  '
               f'mean={np.mean(vals):.3f}  median={np.median(vals):.3f}  '
               f'min={np.min(vals):.3f}  max={np.max(vals):.3f}')
 
 
+REQUIRES = ('single_work_corpus:single_file', 'collection_corpus:collection')
+
+
 def main():
-    args = add_config_args().parse_args()
-    analyze(load_config_from_args(args))
+    run_cli(analyze, require=REQUIRES)
 
 
 if __name__ == '__main__':

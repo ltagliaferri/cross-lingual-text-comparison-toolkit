@@ -22,9 +22,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .corpus import (add_config_args, config_entries, ensure_output_dirs,
-                    load_config_from_args, load_source_corpus, load_stopwords,
-                    tokenize, corpus_label, keep_short_tokens)
+from .corpus import (config_entries, ensure_output_dirs, load_source_corpus,
+                    load_stopwords, tokenize, corpus_label, keep_short_tokens,
+                    run_cli, warn_untokenizable)
 from .metrics import count_cluster_terms as count_clusters, normalize   # noqa: F401
 
 
@@ -47,7 +47,16 @@ def analyze(config):
     if not clusters:
         print('ERROR: config["term_frequency_clusters"] defines no clusters '
               '(keys starting with "_" are treated as comments).')
-        return
+        return 1
+
+    for key, data in clusters.items():
+        where = f'term_frequency_clusters["{key}"]'
+        flagged = set()
+        for stops, short in ((single_stops, single_short),
+                             (collection_stops, collection_short)):
+            terms = [t for t in data['terms'] if t not in flagged]
+            flagged.update(t for t, _ in warn_untokenizable(
+                terms, where, stopwords=stops, keep_short=short))
 
     # --- Single work ---
     print(f'Loading {single_label}…')
@@ -55,7 +64,7 @@ def analyze(config):
     single_tokens = tokenize(single_text, stopwords=single_stops, keep_short=single_short)
     if not single_tokens:
         print(f'ERROR: {single_label} tokenized to nothing — check its path and encoding.')
-        return
+        return 1
     single_counts = count_clusters(single_tokens, clusters)
     single_norm   = normalize(single_counts, len(single_tokens))
 
@@ -74,12 +83,15 @@ def analyze(config):
 
     for g, data in group_data.items():
         data['counts'] = count_clusters(data['tokens'], clusters)
-        data['norm']   = normalize(data['counts'], len(data['tokens']))
+        # a group with no tokens has no rate: leave it blank in the CSV and
+        # as a gap in the plot rather than reporting a real-looking 0.0
+        data['norm']   = (normalize(data['counts'], len(data['tokens']))
+                          if data['tokens'] else {k: None for k in data['counts']})
 
     if not all_collection_tokens:
         print(f'ERROR: {collection_label} tokenized to nothing — check its path and, '
               'for a collection, its "groups" list.')
-        return
+        return 1
 
     all_collection_counts = count_clusters(all_collection_tokens, clusters)
     all_collection_norm   = normalize(all_collection_counts, len(all_collection_tokens))
@@ -105,7 +117,8 @@ def analyze(config):
             data = group_data[g]
             row = [data['label'], len(data['tokens'])] + \
                   [data['counts'][k] for k in cluster_keys] + \
-                  [data['norm'][k]   for k in cluster_keys]
+                  ['' if data['norm'][k] is None else data['norm'][k]
+                   for k in cluster_keys]
             writer.writerow(row)
 
         row = [f'{collection_label} (all)', len(all_collection_tokens)] + \
@@ -142,12 +155,13 @@ def analyze(config):
 
     # --- Plot 2: cluster frequency across collection groups (line chart) ---
     group_nums = sorted(group_data.keys())
-    group_labels = [f'Group {g}' for g in group_nums]
+    group_labels = [group_data[g]['label'] or f'Group {g}' for g in group_nums]
 
     fig, ax = plt.subplots(figsize=(11, 6))
     colors = plt.cm.tab10.colors
     for i, key in enumerate(cluster_keys):
-        vals = [group_data[g]['norm'][key] for g in group_nums]
+        vals = [np.nan if group_data[g]['norm'][key] is None else group_data[g]['norm'][key]
+                for g in group_nums]
         ax.plot(group_labels, vals, marker='o', label=clusters[key]['label'],
                 color=colors[i % len(colors)], linewidth=2)
 
@@ -170,9 +184,12 @@ def analyze(config):
         print(f'  {clusters[k]["label"]:25s}  {all_collection_norm[k]:6.1f}')
 
 
+REQUIRES = ('single_work_corpus:single_file', 'collection_corpus:collection',
+            'term_frequency_clusters')
+
+
 def main():
-    args = add_config_args().parse_args()
-    analyze(load_config_from_args(args))
+    run_cli(analyze, require=REQUIRES)
 
 
 if __name__ == '__main__':
