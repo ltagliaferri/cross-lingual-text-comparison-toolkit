@@ -136,7 +136,6 @@ _POSITIVE_INT_SETTINGS = (
     ('dependency_parsing', 'chunk_chars'),
     ('cross_corpus_dependency', 'window'),
     ('cross_corpus_dependency', 'chunk_chars'),
-    ('topic_modeling', 'min_topic_size'),
     ('chunking', 'max_chars'),
 )
 
@@ -146,6 +145,13 @@ _NON_NEGATIVE_INT_SETTINGS = (
     ('chunking', 'min_chars'),
     ('chunking', 'collection_item_min_chars'),
     ('chunking', 'collection_item_split_threshold'),
+)
+
+# Settings with a higher floor: (section, key, minimum, why).
+_MINIMUM_INT_SETTINGS = (
+    # HDBSCAN's min_cluster_size must be at least 2; 1 passes BERTopic's
+    # own checks and fails at fit time
+    ('topic_modeling', 'min_topic_size', 2),
 )
 
 # Settings sections that must be JSON objects when present.
@@ -345,8 +351,9 @@ def _check_requirements(config, require, check_paths, problems, warnings):
             problems.append(f'languages["{comp_lang}"] has no "stanza_model", which '
                             'cross_corpus_dependency needs for the comparison corpus')
 
-    int_settings = ([(s, k, 1, 'a positive') for s, k in _POSITIVE_INT_SETTINGS]
-                    + [(s, k, 0, 'a non-negative') for s, k in _NON_NEGATIVE_INT_SETTINGS])
+    int_settings = ([(s, k, 1, 'a positive integer') for s, k in _POSITIVE_INT_SETTINGS]
+                    + [(s, k, 0, 'a non-negative integer') for s, k in _NON_NEGATIVE_INT_SETTINGS]
+                    + [(s, k, m, f'an integer of at least {m}') for s, k, m in _MINIMUM_INT_SETTINGS])
     for section, key, minimum, kind in int_settings:
         sub = config.get(section)
         if isinstance(sub, dict) and key in sub:
@@ -358,7 +365,7 @@ def _check_requirements(config, require, check_paths, problems, warnings):
                 (isinstance(value, float) and value.is_integer())
             ok = whole and value >= minimum
             if not ok:
-                problems.append(f'{section}["{key}"] must be {kind} integer, got {value!r}')
+                problems.append(f'{section}["{key}"] must be {kind}, got {value!r}')
 
     if check_paths:
         seen = set()

@@ -72,10 +72,16 @@ closer to its known translation than to unrelated passages?) — this matters
 most for historical-language corpora, since these models are trained
 predominantly on modern text.
 
-Multilingual encoders truncate long input (LaBSE reads roughly 256
-word-pieces), so with a large `chunking.max_chars` the end of a chunk may
-not be embedded at all — lower it for dense text. Chunks are built from
-blank-line-separated paragraphs, never longer than `chunking.max_chars`:
+Multilingual encoders truncate long input. LaBSE reads 256 word-pieces
+and silently ignores the rest, and medieval Italian and Latin come to about
+3.9 characters per word-piece, so chunks of 800 characters fill the window
+while chunks of 1,600 lose roughly their second half (measured on a
+three-corpus study: at 1,600 characters, 73 to 87 percent of chunks
+overran the window; at 800, none did). The template default is therefore
+`chunking.max_chars: 800`, and `xlt-embed-corpus` prints a warning with a
+suggested `max_chars` for your corpus whenever chunks exceed the model's
+window. Chunks are built from blank-line-separated paragraphs, never
+longer than `chunking.max_chars`:
 an over-long paragraph is split at sentence ends, then line breaks, then
 whitespace. `chunking.min_chars` only drops a whole text shorter than
 it; chunks of a longer text (the last one included) can be shorter than
@@ -84,7 +90,7 @@ keeps everything. All of this describes
 single-file corpora. In a collection corpus, items shorter than
 `chunking.collection_item_min_chars` (default 200) are skipped, since very
 short items give noisy embeddings; an item up to
-`chunking.collection_item_split_threshold` (default 1800) is kept whole, so
+`chunking.collection_item_split_threshold` (default 900) is kept whole, so
 it can be longer than `max_chars`; and a longer item is chunked as above but
 with `collection_item_min_chars` in place of `chunking.min_chars`.
 
@@ -338,6 +344,11 @@ involved.
 
 `tests/test_metrics.py` imports only `cross_lingual_toolkit.metrics`, so
 that half of the suite runs with nothing but `pytest` installed.
+
+## Future work
+
+Deferred review items and open questions are listed in
+[docs/future-work.md](docs/future-work.md).
 
 ## License
 

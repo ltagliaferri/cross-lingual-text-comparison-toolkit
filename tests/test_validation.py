@@ -134,6 +134,17 @@ def test_validate_config_reports_per_script_problems(needle, require, mutate):
     assert needle in str(exc.value)
 
 
+def test_min_topic_size_must_be_at_least_two():
+    # HDBSCAN cannot form a cluster of one; 1 used to pass and fail at fit time
+    cfg = _full_config()
+    cfg["lexical_richness"] = {}
+    cfg["topic_modeling"] = {"min_topic_size": 1}
+    with pytest.raises(ValueError, match=r'min_topic_size.*at least 2'):
+        corpus.validate_config(cfg, require=LR, check_paths=False)
+    cfg["topic_modeling"] = {"min_topic_size": 2}
+    assert corpus.validate_config(cfg, require=LR, check_paths=False) == []
+
+
 def test_collection_item_split_threshold_may_be_zero():
     # 0 was valid before the per-script checks existed: chunk every item
     cfg = _full_config()
