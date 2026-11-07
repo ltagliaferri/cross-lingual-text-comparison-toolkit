@@ -80,10 +80,10 @@
   "embedding_model": "sentence-transformers/LaBSE",
 
   "chunking": {
-    "_comment": "Chunks for embedding: paragraphs merged up to max_chars characters (longer paragraphs are split at sentences, then lines, then whitespace); min_chars only drops a whole text shorter than it (0 keeps everything); chunks of a longer text, the last included, can be shorter when a paragraph break and max_chars force a flush. Collection items shorter than collection_item_min_chars are skipped; items at or below collection_item_split_threshold are kept whole (so they can be longer than max_chars); longer items are chunked as above but with collection_item_min_chars in place of min_chars. Encoders truncate long input (LaBSE reads ~256 word-pieces), so lower max_chars for dense text.",
+    "_comment": "Chunks for embedding: paragraphs merged up to max_chars characters (longer paragraphs are split at sentences, then lines, then whitespace); min_chars only drops a whole text shorter than it (0 keeps everything); chunks of a longer text, the last included, can be shorter when a paragraph break and max_chars force a flush. Collection items shorter than collection_item_min_chars are skipped; items at or below collection_item_split_threshold are kept whole (so they can be longer than max_chars); longer items are chunked as above but with collection_item_min_chars in place of min_chars. Encoders truncate long input: LaBSE reads 256 word-pieces and silently ignores the rest, and medieval Italian and Latin run about 3.9 characters per word-piece, so 800 characters fills the window and 1600 loses the second half of most chunks. xlt-embed-corpus warns when chunks exceed the model's window and suggests a max_chars for your corpus.",
     "min_chars": 300,
-    "max_chars": 1600,
-    "collection_item_split_threshold": 1800,
+    "max_chars": 800,
+    "collection_item_split_threshold": 900,
     "collection_item_min_chars": 200
   },
 
@@ -162,7 +162,7 @@
   },
 
   "topic_modeling": {
-    "_comment": "Used by analysis_b_topics.py. min_topic_size is the smallest number of chunks BERTopic will call a topic — lower it for small corpora. The remaining keys are language codes; extra_stopwords supplements load_stopwords(), keep_stopwords exempts specific words from removal.",
+    "_comment": "Used by analysis_b_topics.py. min_topic_size is the smallest number of chunks BERTopic will call a topic — lower it for small corpora (minimum 2). The remaining keys are language codes; extra_stopwords supplements load_stopwords(), keep_stopwords exempts specific words from removal.",
     "min_topic_size": 8,
     "en": {
       "extra_stopwords": [],

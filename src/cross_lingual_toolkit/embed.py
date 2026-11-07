@@ -62,7 +62,7 @@ def _split_paragraph(p: str, max_chars: int) -> List[str]:
     return _hard_wrap(p, max_chars)
 
 
-def chunk_by_paragraph(text: str, min_chars: int = 300, max_chars: int = 1600) -> List[str]:
+def chunk_by_paragraph(text: str, min_chars: int = 300, max_chars: int = 800) -> List[str]:
     """
     Split text into paragraph-based chunks of at most max_chars characters.
 
@@ -159,6 +159,39 @@ def get_model(name: str = "sentence-transformers/LaBSE"):
     return SentenceTransformer(name)
 
 
+def truncation_report(texts: List[str], model, limit: Optional[int] = None) -> Optional[dict]:
+    """
+    How many of `texts` are longer than the model's input window.
+
+    Sentence-transformer models expose the tokenizer they were trained with
+    and `max_seq_length`, the number of word-pieces they read before silently
+    truncating. Returns {'over', 'total', 'limit', 'suggested_max_chars'},
+    where the suggestion is the chunk length (in characters) that fits the
+    window at this corpus's characters-per-word-piece ratio, with headroom.
+    Returns None when the model exposes no tokenizer or limit, so a stub or
+    an unusual model never blocks embedding.
+    """
+    tokenizer = getattr(model, 'tokenizer', None)
+    limit = limit or getattr(model, 'max_seq_length', None)
+    if tokenizer is None or not limit or not texts:
+        return None
+    try:
+        lengths = [len(tokenizer(t, add_special_tokens=True, truncation=False)['input_ids'])
+                   for t in texts]
+    except Exception:          # a tokenizer with another calling convention
+        return None
+    total_pieces = sum(lengths)
+    if not total_pieces:
+        return None
+    chars_per_piece = sum(len(t) for t in texts) / total_pieces
+    return {
+        'over': sum(1 for n in lengths if n > limit),
+        'total': len(texts),
+        'limit': int(limit),
+        'suggested_max_chars': int(chars_per_piece * (limit - 2) * 0.85),
+    }
+
+
 def _cache_key(texts: List[str], model_name: Optional[str]) -> str:
     """SHA-256 over the model name and every chunk text, for embed_chunks."""
     h = hashlib.sha256((model_name or '').encode('utf-8'))
@@ -190,6 +223,13 @@ def embed_chunks(chunks: List[dict], model,
         print(f"  Cached embeddings in {cache_path} do not match the current "
               f"chunks or model; recomputing")
 
+    report = truncation_report(texts, model)
+    if report and report['over']:
+        print(f"  WARNING: {report['over']} of {report['total']} chunks are longer than "
+              f"the model's input window of {report['limit']} word-pieces, so the text "
+              f"past the window is not embedded. Lower chunking.max_chars (about "
+              f"{report['suggested_max_chars']} characters fits this corpus) and rerun "
+              f"xlt-embed-corpus.")
     print(f"  Embedding {len(texts)} chunks…")
     embeddings = model.encode(
         texts,

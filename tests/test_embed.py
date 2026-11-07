@@ -206,6 +206,45 @@ class _FakeModel:
         return np.ones((len(texts), self.dim))
 
 
+class _FakeTokenizer:
+    """Roughly one word-piece per four characters, plus [CLS]/[SEP]."""
+    def __call__(self, text, **kwargs):
+        return {"input_ids": list(range(len(text) // 4 + 2))}
+
+
+class _FakeModelWithTokenizer(_FakeModel):
+    def __init__(self, max_seq_length):
+        super().__init__()
+        self.tokenizer = _FakeTokenizer()
+        self.max_seq_length = max_seq_length
+
+
+def test_truncation_report_counts_chunks_over_the_window():
+    texts = ["x" * 400, "y" * 100]          # 102 and 27 word-pieces
+    report = embed.truncation_report(texts, _FakeModelWithTokenizer(50))
+    assert report["over"] == 1 and report["total"] == 2 and report["limit"] == 50
+    # 500 chars / 129 pieces ≈ 3.88 chars per piece; 48 pieces of content, 15% headroom
+    assert report["suggested_max_chars"] == int(500 / 129 * 48 * 0.85)
+
+
+def test_truncation_report_is_none_without_a_tokenizer():
+    assert embed.truncation_report(["abc"], _FakeModel()) is None
+
+
+def test_embed_chunks_warns_when_chunks_exceed_the_model_window(tmp_path, capsys):
+    chunks = [{"text": "x" * 400}, {"text": "y" * 100}]
+    embed.embed_chunks(chunks, _FakeModelWithTokenizer(50), tmp_path / "x.npy")
+    out = capsys.readouterr().out
+    assert "WARNING: 1 of 2 chunks are longer than the model's input window of 50" in out
+    assert "chunking.max_chars" in out
+
+
+def test_embed_chunks_is_quiet_when_chunks_fit_the_window(tmp_path, capsys):
+    chunks = [{"text": "x" * 100}]
+    embed.embed_chunks(chunks, _FakeModelWithTokenizer(50), tmp_path / "x.npy")
+    assert "WARNING" not in capsys.readouterr().out
+
+
 def test_embed_chunks_recomputes_a_cache_with_the_wrong_row_count(tmp_path):
     cache = tmp_path / "x.npy"
     np.save(cache, np.zeros((8, 4)))

@@ -26,7 +26,7 @@ def prepare_single_file(config, corpus_id):
     text = load_source_corpus(config, corpus_id)
     parts = chunk_by_paragraph(text,
                                min_chars=int(chunking.get('min_chars', 300)),
-                               max_chars=int(chunking.get('max_chars', 1600)))
+                               max_chars=int(chunking.get('max_chars', 800)))
     return [
         {
             'chunk_id': f'{corpus_id}_{i:04d}',
@@ -42,9 +42,9 @@ def prepare_single_file(config, corpus_id):
 def prepare_collection(config, corpus_id):
     entry = config['corpora'][corpus_id]
     chunking = config.get('chunking', {})
-    split_threshold = int(chunking.get('collection_item_split_threshold', 1800))
+    split_threshold = int(chunking.get('collection_item_split_threshold', 900))
     item_min_chars  = int(chunking.get('collection_item_min_chars', 200))
-    max_chars       = int(chunking.get('max_chars', 1600))
+    max_chars       = int(chunking.get('max_chars', 800))
 
     items = load_source_corpus(config, corpus_id)
     chunks = []
