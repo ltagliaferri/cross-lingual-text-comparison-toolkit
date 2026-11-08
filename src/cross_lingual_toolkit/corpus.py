@@ -466,6 +466,11 @@ def validate_config(config, require=None, check_paths=True):
                 not isinstance(lang_cfg['stopwords_file'], str):
             problems.append(f'{where}["stopwords_file"] must be a string, '
                             f'got {lang_cfg["stopwords_file"]!r}')
+        elif _spacy_stopwords_code(lang, lang_cfg.get('stopwords_file')) is not None:
+            try:
+                load_stopwords(config, lang)
+            except (ValueError, ImportError) as e:
+                problems.append(f'{where}["stopwords_file"]: {e}')
 
     for section in _SETTINGS_SECTIONS:
         object_or_empty(section)
@@ -588,18 +593,56 @@ def resolve_stopwords_path(config, rel_path):
 # Language settings
 # ---------------------------------------------------------------------------
 
+def _spacy_stopwords_code(language, setting):
+    """
+    The spaCy language code a `stopwords_file` sentinel asks for — the
+    config's own code for "spacy", <lang> for "spacy:<lang>" — or None if
+    `setting` is not a sentinel (i.e. names a file).
+    """
+    if setting == 'spacy':
+        return language
+    if isinstance(setting, str) and setting.startswith('spacy:'):
+        return setting[len('spacy:'):]
+    return None
+
+
+def _spacy_stop_words(code):
+    """spaCy's built-in stopword list for language `code` (no model needed)."""
+    try:
+        import spacy
+    except ImportError:
+        raise ImportError(
+            'the "spacy" and "spacy:<lang>" stopword lists need spaCy, from the '
+            'parsing extra: pip install "cross-lingual-toolkit[parsing]"'
+        ) from None
+    try:
+        lang_class = spacy.util.get_lang_class(code)
+    except ImportError:
+        raise ValueError(
+            f'spaCy has no built-in stopword list for language code "{code}". '
+            'If your config uses its own code, name spaCy\'s code with '
+            '"spacy:<lang>", e.g. "spacy:it".'
+        ) from None
+    return {normalize_term(w) for w in lang_class.Defaults.stop_words}
+
+
 def load_stopwords(config, language):
     """
     Load the stopword set configured for `language` (empty set if none
     configured). See resolve_stopwords_path() for where files are looked
     for. Blank lines and comment lines (leading "#", indented or not) are
     ignored. Entries are normalized with normalize_term(), so "The" in a
-    list removes "the" from the (lowercased) text.
+    list removes "the" from the (lowercased) text. The sentinels "spacy"
+    and "spacy:<lang>" use spaCy's built-in list for `language` / <lang>
+    instead of a file.
     """
     lang_cfg = config.get('languages', {}).get(language, {})
     rel_path = lang_cfg.get('stopwords_file')
     if not rel_path:
         return set()
+    spacy_code = _spacy_stopwords_code(language, rel_path)
+    if spacy_code is not None:
+        return _spacy_stop_words(spacy_code)
     path = resolve_stopwords_path(config, rel_path)
     with open(path, encoding='utf-8-sig') as f:   # skip a byte-order mark
         return {normalize_term(line.strip()) for line in f

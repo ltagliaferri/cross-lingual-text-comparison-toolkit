@@ -88,27 +88,24 @@ tokenizer cannot find in Chinese, Japanese or Thai. In priority order:
    words are one character. Until this lands, the README should say plainly
    that the word-based analyses need a space-delimited script, and that
    BERTopic's default vectorizer has the same limit.
-4. **Stopwords beyond Italian and Latin.** Only two example lists ship. Allow
-   `stopwords_file: "spacy"` to use spaCy's built-in list for the language, so
-   a new user is not blocked on writing one.
-5. **Model flexibility.** Add an `embedding_max_seq_length` override (LaBSE's
+4. **Model flexibility.** Add an `embedding_max_seq_length` override (LaBSE's
    underlying BERT accepts 512 positions; the sentence-transformers packaging
    stops at 256), and document alternatives: multilingual-e5 needs an
    instruction prefix on each text; BGE-M3 has an 8,192-token window and
    allows far longer chunks. The truncation check already adapts to whichever
    model is loaded.
-6. **A translation-pair validation command.** The README tells every user to
+5. **A translation-pair validation command.** The README tells every user to
    validate the embedding model on known translation pairs from their own
    corpus before trusting distances, and offers no tool for it. An
    `xlt-validate-pairs` command taking aligned passages and reporting how
    often each passage's nearest neighbour is its translation is the one
    step that is identical for every language pair.
-7. **A first example study, in a distant language family.** The repository
+6. **A first example study, in a distant language family.** The repository
    ships no corpus at all (the study it was built for is private). A small
    public-domain example (English and Chinese, say) with a checked-in config
    and expected outputs would serve three purposes: a template for new users
-   that is not medieval Italian, an integration test for items 1 to 4, and a
+   that is not medieval Italian, an integration test for items 1 to 3, and a
    smoke test of the model-dependent paths that the unit tests cannot cover.
 
-Items 1, 2 and 4 are roughly a day's work together. Item 3 is the largest
+Items 1 and 2 are roughly a day's work together. Item 3 is the largest
 and most changes what the toolkit can claim to support.
