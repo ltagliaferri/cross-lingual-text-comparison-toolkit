@@ -20,7 +20,7 @@
 
   "languages": {
     "en": {
-      "_comment": "spacy_model (+ optional spacy_model_fallback) is needed if this language is used with adjective_window.py or dependency_parsing.py, or as primary_language for cross_corpus_dependency.py. stanza_model is needed if this is your comparison_language. stopwords_file, keep_short_tokens, and adjective_suffixes are all optional tokenizer tuning — see README. stopwords_file is looked for next to this config file, under the working directory, then among the lists bundled with the package.",
+      "_comment": "spacy_model (+ optional spacy_model_fallback) is needed if this language is used with adjective_window.py or dependency_parsing.py, or as primary_language for cross_corpus_dependency.py. stanza_model is needed if this is your comparison_language. stopwords_file, keep_short_tokens, and adjective_suffixes are all optional tokenizer tuning — see README. stopwords_file is looked for next to this config file, under the working directory, then among the lists bundled with the package. Set it to \"spacy\" to use spaCy's built-in list for this language code, or \"spacy:<lang>\" (e.g. \"spacy:it\") when your code is not spaCy's (needs the parsing extra, no model).",
       "spacy_model": "en_core_web_lg",
       "spacy_model_fallback": "en_core_web_sm",
       "stopwords_file": null,

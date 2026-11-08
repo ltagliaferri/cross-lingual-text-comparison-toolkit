@@ -168,6 +168,25 @@ def test_cross_corpus_frequency_warns_on_one_sided_stopwords(study, tmp_path, ca
     assert "stopwords_file" in capsys.readouterr().out
 
 
+def test_cross_corpus_frequency_counts_a_spacy_sentinel_as_a_list(
+        study, tmp_path, capsys, monkeypatch):
+    import sys
+    import types
+
+    class Spanish:
+        class Defaults:
+            stop_words = {"el", "la", "una", "y", "era"}
+
+    monkeypatch.setitem(sys.modules, "spacy", types.SimpleNamespace(
+        util=types.SimpleNamespace(get_lang_class=lambda code: Spanish)))
+    study["languages"]["es"]["stopwords_file"] = "spacy"
+    cross_corpus_frequency.analyze(study)
+    assert "stopwords_file" not in capsys.readouterr().out
+    del study["languages"]["en"]["stopwords_file"]
+    cross_corpus_frequency.analyze(study)
+    assert '"es" has a stopwords_file' in capsys.readouterr().out
+
+
 def test_analyses_write_under_an_explicit_output_root(study, tmp_path):
     out = tmp_path / "elsewhere"
     study["_output_root"] = str(out)

@@ -223,13 +223,14 @@ lists; an absolute path also works. Entirely optional: a language with no
 error. One caveat for `cross_corpus_frequency.py`: configure a list for
 both languages or for neither, since removing stopwords from only one
 side of a cross-corpus comparison biases every rate and G² score toward
-that corpus (the script warns if you do). If you already
-have a spaCy model installed for your language, its built-in list is a
-reasonable starting point:
-```python
-import spacy
-print(sorted(spacy.load("en_core_web_sm").Defaults.stop_words))
-```
+that corpus (the script warns if you do). Instead of a file name,
+`stopwords_file` also accepts `"spacy"`, which uses spaCy's built-in
+stopword list for the language code (about 70 languages; needs the
+`parsing` extra but no model download), or `"spacy:<lang>"` to name
+spaCy's code when your config uses its own (e.g. `"spacy:it"` for a
+language you call `it_med`). A real file named `spacy` is shadowed by the
+sentinel; rename it. An unknown code or a missing spaCy is reported when
+the config is validated.
 
 Every script accepts `--config path/to/your_study.json`,
 `--corpus-root path/to/corpus/root` (the directory containing the paths

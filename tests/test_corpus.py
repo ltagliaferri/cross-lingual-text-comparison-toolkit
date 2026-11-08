@@ -1,5 +1,7 @@
 import json
 import os
+import sys
+import types
 
 import pytest
 
@@ -204,6 +206,88 @@ def test_load_stopwords_missing_file_lists_what_was_tried(tmp_path, monkeypatch)
     cfg = {"languages": {"en": {"stopwords_file": "nope.txt"}}}
     with pytest.raises(FileNotFoundError, match="Tried:"):
         corpus.load_stopwords(cfg, "en")
+
+
+def _fake_spacy():
+    """A stand-in for the spacy package: a stopword list for "en" only."""
+    class English:
+        class Defaults:
+            stop_words = {"The", "and"}
+
+    def get_lang_class(code):
+        if code == "en":
+            return English
+        raise ImportError(f"[E048] Can't import language {code}")   # as spaCy does
+
+    return types.SimpleNamespace(util=types.SimpleNamespace(get_lang_class=get_lang_class))
+
+
+def test_load_stopwords_spacy_uses_the_builtin_list(monkeypatch):
+    monkeypatch.setitem(sys.modules, "spacy", _fake_spacy())
+    cfg = {"languages": {"en": {"stopwords_file": "spacy"}}}
+    assert corpus.load_stopwords(cfg, "en") == {"the", "and"}
+
+
+def test_load_stopwords_spacy_lang_maps_a_config_code(monkeypatch):
+    monkeypatch.setitem(sys.modules, "spacy", _fake_spacy())
+    cfg = {"languages": {"en_test": {"stopwords_file": "spacy:en"}}}
+    assert corpus.load_stopwords(cfg, "en_test") == {"the", "and"}
+
+
+def test_load_stopwords_spacy_unknown_code_names_it(monkeypatch):
+    monkeypatch.setitem(sys.modules, "spacy", _fake_spacy())
+    cfg = {"languages": {"it_med": {"stopwords_file": "spacy"}}}
+    with pytest.raises(ValueError, match='"it_med".*spacy:<lang>'):
+        corpus.load_stopwords(cfg, "it_med")
+
+
+def test_load_stopwords_spacy_missing_names_the_parsing_extra(monkeypatch):
+    monkeypatch.setitem(sys.modules, "spacy", None)
+    cfg = {"languages": {"en": {"stopwords_file": "spacy"}}}
+    with pytest.raises(ImportError, match=r"\[parsing\]"):
+        corpus.load_stopwords(cfg, "en")
+
+
+def test_spacy_stopwords_remove_words_in_tokenize(monkeypatch):
+    monkeypatch.setitem(sys.modules, "spacy", _fake_spacy())
+    cfg = {"languages": {"en": {"stopwords_file": "spacy"}}}
+    stops = corpus.load_stopwords(cfg, "en")
+    assert corpus.tokenize("The garden and The stone", stopwords=stops) == ["garden", "stone"]
+
+
+def test_validate_config_reports_spacy_stopword_problems(monkeypatch):
+    cfg = _valid_config()
+    cfg["languages"]["en"]["stopwords_file"] = "spacy:xx"
+    monkeypatch.setitem(sys.modules, "spacy", _fake_spacy())
+    with pytest.raises(ValueError, match='languages\\["en"\\].*"xx"'):
+        corpus.validate_config(cfg)
+    monkeypatch.setitem(sys.modules, "spacy", None)
+    with pytest.raises(ValueError, match="parsing"):
+        corpus.validate_config(cfg)
+
+
+def test_validate_config_reports_only_the_failing_spacy_language(monkeypatch):
+    cfg = _valid_config()
+    cfg["languages"]["en"]["stopwords_file"] = "spacy"
+    cfg["languages"]["xx"] = {"stopwords_file": "spacy:xx"}
+    monkeypatch.setitem(sys.modules, "spacy", _fake_spacy())
+    # "en" resolves; "xx" is the only problem
+    with pytest.raises(ValueError) as excinfo:
+        corpus.validate_config(cfg)
+    assert '"xx"' in str(excinfo.value) and 'languages["en"]' not in str(excinfo.value)
+
+
+def test_validate_config_does_not_import_spacy_for_a_file_list(monkeypatch):
+    monkeypatch.setitem(sys.modules, "spacy", None)   # any import would fail
+    cfg = _valid_config()
+    cfg["languages"]["en"]["stopwords_file"] = "spacy_words.txt"
+    assert corpus.validate_config(cfg) == []
+
+
+def test_load_stopwords_spacy_real():
+    pytest.importorskip("spacy")
+    cfg = {"languages": {"en": {"stopwords_file": "spacy"}}}
+    assert "the" in corpus.load_stopwords(cfg, "en")
 
 
 # ---------------------------------------------------------------------------
