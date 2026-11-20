@@ -161,6 +161,26 @@
     }
   },
 
+  "stylometry": {
+    "_comment": "Used by stylometry.py (xlt-stylometry): same-language stylometry (Burrows's / Cosine Delta, General Imposters). Every corpus it reads must share one language. Only 'groups' is required. A selector is a corpus id (the whole corpus), '<corpus_id>:<group>' (one configured group of a collection) or '<corpus_id>:<group>/<item>' (one item: its file name without .txt). groups_file is an optional CSV (header: group,selector) whose rows add to groups; it is looked for next to this config file, then under the working directory. corpora (optional; default: no restriction) restricts which corpora selectors and rolling.corpus may use. Stopword lists are NOT applied: function words are the signal. mfw: number of most frequent words used as features (200). sample_words: tokens per sample (2000; Delta is unreliable below a few thousand words per sample). strip_patterns: regular expressions (multiline) removed before tokenizing, e.g. fixed opening and closing formulas. exclude_words: never features, e.g. proper names. distance: 'cosine_delta' (default) or 'burrows_delta'. imposters: groups forming the General Imposters pool; verification: questioned/candidate pairs, neither in imposters. iterations (100) and feature_fraction (0.5) tune General Imposters; random_seed (42) fixes every random choice. rolling (optional): windows of window_words tokens (2000) every step_words (500) across one corpus, each scored against the reference groups. A text in two groups, or twice in one, is a warning, not an error.",
+    "groups": {
+      "_comment": "Group names are your own; these are placeholders.",
+      "group_one": ["author_a_collection:Group1"],
+      "group_two": ["author_a_collection:Group2"],
+      "candidate": ["author_a_work"]
+    },
+    "mfw": 200,
+    "sample_words": 2000,
+    "strip_patterns": [],
+    "exclude_words": [],
+    "distance": "cosine_delta",
+    "imposters": [],
+    "verification": [],
+    "iterations": 100,
+    "feature_fraction": 0.5,
+    "random_seed": 42
+  },
+
   "topic_modeling": {
     "_comment": "Used by analysis_b_topics.py. min_topic_size is the smallest number of chunks BERTopic will call a topic — lower it for small corpora (minimum 2). The remaining keys are language codes; extra_stopwords supplements load_stopwords(), keep_stopwords exempts specific words from removal.",
     "min_topic_size": 8,

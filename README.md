@@ -3,7 +3,10 @@
 A pipeline for comparing texts across language boundaries, using
 multilingual sentence embeddings to bridge languages that break
 traditional stylometry (function-word counting requires a shared lexicon;
-embeddings don't). Built for cross-lingual authorship questions, but the
+embeddings don't). Within a single language, it also offers that
+stylometry (`xlt-stylometry`: Burrows's and Cosine Delta, General
+Imposters), as the same-language complement to the cross-lingual tools.
+Built for cross-lingual authorship questions, but the
 underlying tools — embedding-space clustering, bilingual concept
 frequency, cross-lingual dependency comparison, topic modeling — apply
 just as well to translation studies, genre comparison, or dating texts.
@@ -54,6 +57,7 @@ over `output.root`.
 | `cross_corpus_dependency.py` | `xlt-cross-corpus-dependency` | Cross-lingual dependency comparison (spaCy for the primary language, Stanza for the comparison language) |
 | `analysis_a_umap.py` | `xlt-analysis-umap` | Embedding-space clustering by author/work, UMAP projection, permutation test |
 | `analysis_b_topics.py` | `xlt-analysis-topics` | Cross-lingual topic modeling (BERTopic over the embedding space) |
+| `stylometry.py` | `xlt-stylometry` | Same-language stylometry: most-frequent-word Delta between groups, leave-one-out attribution, General Imposters verification, rolling Delta |
 
 ## Method
 
@@ -116,6 +120,107 @@ with many clusters, and words that cluster in real text, treat them as
 lower bounds. A G² of 0 (equal rates, or no occurrences on either side) is
 reported as favouring "neither".
 
+**Stylometry (same language)** (`stylometry.py`). The embedding
+analyses measure meaning, not style: LaBSE is trained to make translations
+look alike, so it discards the habits of expression authorship rests on
+and in practice tracks topic and genre. Stylometry measures those habits
+directly, as the relative frequencies of the most frequent words (mostly
+function words). It therefore only works *within one language*: every
+corpus the `stylometry` section uses (and the rolling corpus) must share
+one `language`, and validation says so otherwise. Use the embedding
+analyses to compare across languages.
+
+You define groups of texts in `stylometry.groups`, e.g. letters from
+different periods, scribes or attributed authors. Each group's texts are
+concatenated in config order (collection items in their sorted load
+order), cleaned with `strip_patterns`, tokenized as everywhere else but
+*without* stopword removal (function words are the signal), and cut into
+consecutive samples of `sample_words` tokens. The features are the `mfw`
+most frequent tokens over all samples of all groups (minus
+`exclude_words`; ties broken alphabetically), as relative frequencies
+per sample, z-scored over all samples (population SD; a feature with zero
+SD is dropped and the count printed). Burrows's Delta is the mean
+absolute difference of two z-score vectors; Cosine Delta (Smith and
+Aldridge 2011; Evert et al. 2017) is their cosine distance (1 − cosine
+similarity). It is the default, and the more robust of the two.
+The numerical core (samples, features, Delta, attribution, General
+Imposters, rolling Delta) is in `stylo_core.py`, which needs only numpy
+and the standard library; `stylometry.py` adds the config, I/O and plots.
+
+- **Distances.** Group-to-group distance is the distance between group
+  centroids (the mean of a group's sample z-vectors).
+- **Leave-one-out attribution.** Each sample is assigned to the nearest
+  group centroid, its own group's centroid computed without it; the
+  script prints the confusion matrix and accuracy. High accuracy means the
+  groups are stylistically distinguishable. As is common practice, the
+  z-scores are computed once over all samples, the held-out one included;
+  only the centroid leaves it out.
+- **General Imposters verification** (Koppel and Winter 2014; Kestemont
+  et al. 2016). For each `verification` pair: in each of `iterations`
+  rounds, sample `feature_fraction` of the features and as many samples
+  from the `imposters` groups as the candidate has (all, if fewer). A
+  questioned sample wins the round when its nearest candidate sample is
+  closer than every sampled imposter. The score is wins / (iterations ×
+  questioned samples), in [0, 1]; the swapped score (candidate as
+  questioned) and their mean are reported too, since the two groups may
+  differ in size.
+- **Rolling Delta** (optional `rolling`). Windows of `window_words`
+  tokens every `step_words` across one corpus, each z-scored with the
+  group samples' means and SDs and compared with each reference group's
+  centroid. A warning is printed if the rolling corpus is also part of a
+  reference group, which inflates its closeness to that group.
+
+Config keys (all optional except `groups`):
+
+| Key | Meaning | Default |
+|---|---|---|
+| `groups` | `{group_name: [selector, ...]}`. A selector is a corpus id (the whole corpus), `"<corpus_id>:<group>"` (one configured group of a collection, e.g. `"letters:Volume1"`), or `"<corpus_id>:<group>/<item>"` (one item, its file name without `.txt`, e.g. `"letters:Volume1/017"`). Group and item selectors need a collection with `groups` | required |
+| `groups_file` | CSV with a `group,selector` header whose rows add to (never replace) `groups`, for long lists. A relative path is looked for next to the config file, then under the working directory (like `stopwords_file`, without the bundled lists) | none |
+| `corpora` | a restriction: the only corpus ids that selectors and `rolling.corpus` may use (each must be a configured corpus) | no restriction |
+| `mfw` | number of most frequent words used as features | 200 |
+| `sample_words` | tokens per sample; a trailing remainder shorter than half a sample is dropped | 2000 |
+| `strip_patterns` | regular expressions removed (replaced by a space) from every text before tokenizing, after NFC normalization, with `re.MULTILINE` | `[]` |
+| `exclude_words` | words never used as features (e.g. proper names, which track topic) | `[]` |
+| `distance` | `"cosine_delta"` or `"burrows_delta"` | `"cosine_delta"` |
+| `imposters` | groups forming the imposter pool | `[]` |
+| `verification` | `[{"questioned": group, "candidate": group}, ...]`; the two must differ and neither may be an imposter; needs `imposters` | `[]` |
+| `iterations` | General Imposters rounds | 100 |
+| `feature_fraction` | share of features sampled per round, in (0, 1] | 0.5 |
+| `rolling` | `{"corpus": id, "references": [group, ...], "window_words": 2000, "step_words": 500}` | none |
+| `random_seed` | seed for every random choice | 42 |
+
+A text assigned to two groups, or twice to one group, is a warning, not
+an error, since overlapping groups can be intended; it does make the
+groups look more alike.
+
+Outputs: `results/stylometry_distances.csv` (group × group),
+`results/stylometry_attribution.csv` (per sample: group, nearest group,
+distance to each group; blank where a group has no other sample),
+`results/stylometry_features.csv` (the MFW list with overall relative
+frequency, and whether a zero SD dropped it),
+`results/stylometry_verification.csv`, `results/stylometry_rolling.csv`,
+`visualizations/stylometry_distances.png` (heatmap) and
+`visualizations/stylometry_rolling.png`.
+
+Cautions:
+
+- **Editions.** Punctuation and spelling in edited historical texts are
+  often the modern editor's, so the features are words only (no
+  punctuation, no sentence length), and texts from different editions may
+  still differ for editorial reasons.
+- **Formulas.** Fixed openings and closings (a letter's salutation and
+  farewell) inflate a group's consistency; strip them with
+  `strip_patterns`.
+- **Sample size.** Delta is unreliable below a few thousand words per
+  sample (Eder 2015). A group too short for one full sample is kept as one
+  short sample, with a printed warning.
+- **Same language only.** See above.
+- **The imposters score is a proportion, not a test.** It is not a
+  p-value, and it is only as good as the imposter pool, which should match
+  the questioned and candidate texts in language, period and genre as
+  closely as possible. With fewer than three imposter groups or ten
+  imposter samples it is weak, and the script prints a warning.
+
 **Counting.** Configured terms, forms, lemmas and stopwords are matched
 case-insensitively and after Unicode NFC normalization, exactly as the
 text is tokenized (lowercase, NFC, split on anything that is not a
@@ -170,7 +275,7 @@ Top-level keys:
   rather than guess).
 - `term_frequency_clusters`, `adjective_anchor_terms`, `dependency_agents`,
   `cross_corpus_concept_clusters`, `cross_corpus_dependency`,
-  `topic_modeling` — the domain-specific term lists each script needs. All
+  `topic_modeling`, `stylometry` — the domain-specific term lists each script needs. All
   keys inside these are your own vocabulary, not fixed categories.
 - `colors`, `chunking`, `embedding_model`, `output` — cosmetic/pipeline
   defaults, all optional (`embedding_model` defaults to
@@ -265,6 +370,9 @@ referenced in `corpora[...]['path']`), and `--output-root path/to/output`.
      (both `single_file` for the two `cross_corpus_*` scripts).
    - `adjective_window.py` and `dependency_parsing.py` read
      `primary_corpora` and `primary_language`.
+   - `stylometry.py` reads only its `stylometry` section (see
+     **Stylometry (same language)** above), whose corpora must share one
+     language.
    - `embed_corpus.py` embeds every entry in `corpora`;
      `analysis_a_umap.py` plots the corpora beyond the two compared ones
      as context.
@@ -282,12 +390,12 @@ referenced in `corpora[...]['path']`), and `--output-root path/to/output`.
 ## Setup
 
 The core install is small — matplotlib, numpy, scipy, scikit-learn — and
-covers `term_frequency.py`, `lexical_richness.py` and
-`cross_corpus_frequency.py`. The model-heavy stacks are extras, so add
+covers `term_frequency.py`, `lexical_richness.py`,
+`cross_corpus_frequency.py` and `stylometry.py`. The model-heavy stacks are extras, so add
 only what your analysis needs:
 
 ```bash
-pip install -e .                  # core: frequency + lexical richness
+pip install -e .                  # core: frequency, lexical richness, stylometry
 pip install -e ".[embeddings]"    # + embed_corpus, analysis_a_umap
 pip install -e ".[parsing]"       # + adjective_window, both dependency scripts
 pip install -e ".[topics]"        # + analysis_b_topics
@@ -336,8 +444,8 @@ pytest
 Covers the corpus-independent logic — tokenization (including combining
 marks and joiners), per-script config validation and on-disk path checks,
 stopword resolution, chunking and parser splitting, the embedding cache,
-the permutation test, Dunning G², TTR/MATTR, dependency-label and
-context-window helpers — plus end-to-end runs of the model-free analyses
+the permutation test, Dunning G², TTR/MATTR, Burrows's and Cosine
+Delta, General Imposters, dependency-label and context-window helpers — plus end-to-end runs of the model-free analyses
 over a small synthetic two-language corpus, the spaCy/Stanza extraction
 code driven by stub pipelines, and the CLI wrappers' error reporting and
 exit codes. No real corpus data and no downloaded spaCy/Stanza models are

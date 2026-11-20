@@ -55,6 +55,7 @@ xlt-cross-corpus-frequency = "cross_lingual_toolkit.cross_corpus_frequency:main"
 xlt-cross-corpus-dependency = "cross_lingual_toolkit.cross_corpus_dependency:main"
 xlt-analysis-umap = "cross_lingual_toolkit.analysis_a_umap:main"
 xlt-analysis-topics = "cross_lingual_toolkit.analysis_b_topics:main"
+xlt-stylometry = "cross_lingual_toolkit.stylometry:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

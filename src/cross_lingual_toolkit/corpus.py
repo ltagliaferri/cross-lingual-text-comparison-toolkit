@@ -137,6 +137,9 @@ _POSITIVE_INT_SETTINGS = (
     ('cross_corpus_dependency', 'window'),
     ('cross_corpus_dependency', 'chunk_chars'),
     ('chunking', 'max_chars'),
+    ('stylometry', 'mfw'),
+    ('stylometry', 'sample_words'),
+    ('stylometry', 'iterations'),
 )
 
 # 0 means "keep every chunk / item" (or, for the split threshold, "chunk
@@ -145,6 +148,7 @@ _NON_NEGATIVE_INT_SETTINGS = (
     ('chunking', 'min_chars'),
     ('chunking', 'collection_item_min_chars'),
     ('chunking', 'collection_item_split_threshold'),
+    ('stylometry', 'random_seed'),
 )
 
 # Settings with a higher floor: (section, key, minimum, why).
@@ -156,7 +160,8 @@ _MINIMUM_INT_SETTINGS = (
 
 # Settings sections that must be JSON objects when present.
 _SETTINGS_SECTIONS = ('output', 'chunking', 'lexical_richness', 'analysis',
-                      'adjective_window', 'dependency_parsing', 'topic_modeling')
+                      'adjective_window', 'dependency_parsing', 'topic_modeling',
+                      'stylometry')
 
 
 def _check_list(value, where, problems):
@@ -343,7 +348,13 @@ def _check_requirements(config, require, check_paths, problems, warnings):
             cross_langs.append(lang)
 
     for name in sections:
-        _check_section(config, name, cross_langs, problems)
+        if name == 'stylometry':
+            # its own module knows its selectors; imported here, not at the
+            # top, because stylometry imports this module
+            from .stylometry import check_config as check_stylometry
+            used_corpora.extend(check_stylometry(config, check_paths, problems, warnings))
+        else:
+            _check_section(config, name, cross_langs, problems)
 
     if 'cross_corpus_dependency' in sections:
         comp_lang = role_language('comparison_corpus')

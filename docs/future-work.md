@@ -65,7 +65,10 @@ The embedding analyses (`xlt-embed-corpus`, `xlt-analysis-umap`) never
 tokenize and work for every language the model covers. The word-based
 analyses (term frequency, lexical richness, adjective windows, cross-corpus
 frequency) and BERTopic's vectorizer need word boundaries the current
-tokenizer cannot find in Chinese, Japanese or Thai. In priority order:
+tokenizer cannot find in Chinese, Japanese or Thai. Stylometry
+(`xlt-stylometry`), like the other word-based analyses, needs a
+space-delimited script until per-language segmentation (item 3) lands. In
+priority order:
 
 1. **Size chunks by the model's tokenizer, not by characters.** The
    `chunking.max_chars` default (800) fits Italian and Latin, is generous for
@@ -109,3 +112,38 @@ tokenizer cannot find in Chinese, Japanese or Thai. In priority order:
 
 Items 1 and 2 are roughly a day's work together. Item 3 is the largest
 and most changes what the toolkit can claim to support.
+
+## New commands proposed (from the November 2026 study work)
+
+Both extend item 5 above (the translation-pair validation command), which
+stays the place for the validation use; neither is implemented yet.
+
+1. **Translation alignment and matching (`xlt-validate-pairs` /
+   `xlt-align`).** It was prototyped outside the toolkit on 2026-11-18. It
+   matched a 1905 English translation of 70 letters to their Italian
+   originals among 388 files: every letter mapped to a distinct file
+   (scores 0.78–0.94, median margin over the runner-up 0.14), and every
+   checked match was correct. Method: chunk both sides at the configured
+   size. Score a pair (translated text, original) as the mean, over the
+   translated text's chunks, of each chunk's best cosine similarity to any
+   chunk of the original. This is robust to an abridged translation.
+   Report the best and runner-up candidates with the margin. Two uses: (a)
+   item 5's validation that the model finds translations in the user's own
+   corpus, by reporting top-1 accuracy on known pairs; (b) recovering
+   metadata (numbering, recipient, date) from a translated edition for
+   untitled source files.
+2. **Parallel-passage search (`xlt-parallel-passages`).** Also prototyped
+   on 2026-11-18. It splits two corpora in different languages into
+   sentences, embeds them, and for every sentence of one finds its nearest
+   sentence in the other, with the runner-up score. It reports matches over
+   a threshold with locations, and merges runs of consecutive matches into
+   passages. It found an author's Latin translation of the closing chapters
+   of a vernacular work embedded inside a third work (43 of the 82
+   sentence matches at 0.70 or higher, best 0.94). Notes for an
+   implementation: sentence splitting on `.?!;:` creates false
+   "differences" when the two sides split a sentence differently, so align
+   in windows of a few sentences or merge neighbours before comparing.
+   Matches between about 0.70 and 0.80 that fall outside such runs were
+   mostly shared devotional phrases rather than translations. Useful for
+   finding quotation, translation and paraphrase between corpora, and for
+   comparing a translator's version against its source.
