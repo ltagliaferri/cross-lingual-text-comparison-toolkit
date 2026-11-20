@@ -42,6 +42,7 @@ def _full_config():
             "comparison": {"agent_a_forms": ["x"], "agent_b_forms": ["y"],
                            "name_forms": ["z"]},
         },
+        "stylometry": {"groups": {"g": ["work"], "h": ["letters:V1"]}},
     }
 
 
@@ -49,12 +50,12 @@ def _all_requires():
     from cross_lingual_toolkit import (
         adjective_window, analysis_a_umap, analysis_b_topics, cross_corpus_dependency,
         cross_corpus_frequency, dependency_parsing, embed_corpus, lexical_richness,
-        term_frequency,
+        stylometry, term_frequency,
     )
     return [m.REQUIRES for m in (
         adjective_window, analysis_a_umap, analysis_b_topics, cross_corpus_dependency,
         cross_corpus_frequency, dependency_parsing, embed_corpus, lexical_richness,
-        term_frequency)]
+        stylometry, term_frequency)]
 
 
 @pytest.mark.parametrize("require", _all_requires())
