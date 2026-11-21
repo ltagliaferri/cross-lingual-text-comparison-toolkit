@@ -1,4 +1,6 @@
 # Middle Italian stopwords (includes common modern variants).
+# Editions differ in accenting final vowels (perché / perchè, piú / più), so
+# every accented entry is listed with both its acute and its grave form.
 # One token per line; lines starting with # are ignored.
 
 # articles
@@ -65,16 +67,23 @@ ma
 che
 se
 però
+peró
 perché
 perchè
 onde
 poiché
+poichè
 acciò
+acció
+acciocché
+acciocchè
 benché
+benchè
 quando
 come
 dove
 ché
+chè
 dunque
 anco
 ancora
@@ -82,6 +91,10 @@ anzi
 adunque
 perocché
 perocchè
+sicché
+sicchè
+né
+nè
 ovvero
 overo
 sí
@@ -112,6 +125,7 @@ te
 lui
 lei
 sé
+sè
 se
 # demonstratives
 questo
@@ -167,6 +181,7 @@ vostri
 vostre
 # common auxiliary/copula forms
 è
+é
 sono
 era
 erano
@@ -187,6 +202,7 @@ avevano
 ebbe
 ebbero
 avrà
+avrá
 avrebbe
 ho
 abbia
@@ -198,6 +214,7 @@ sonno
 so
 fue
 àe
+áe
 # common adverbs
 non
 più
@@ -217,6 +234,7 @@ ora
 allora
 qui
 là
+lá
 ben
 bene
 male
