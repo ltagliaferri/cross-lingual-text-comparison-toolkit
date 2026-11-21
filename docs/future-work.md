@@ -19,6 +19,21 @@ a PR) if one of them matters for your study.
   cross-lingual comparison has a stopword list and the other does not, but
   not when the two lists differ greatly in size. There is no principled
   threshold; a user-set one could be added.
+- **Character mapping before tokenizing (`char_map`).** Transcriptions
+  of the same author can differ in spelling conventions that carry no
+  stylistic signal. In the Catherine of Siena study, Libro Terzo and the
+  Dialogo accent final vowels acute (*perché, né, sé*) while the other Libri
+  use grave (*perchè, nè, sè*). Libro Sesto uses an older orthography
+  (*et*, *Christo*, *Jesù*). Stylometry uses the most frequent words, which
+  are exactly these function words, so the convention alone made Libro
+  Terzo look like a separate style and Libro Sesto separate perfectly.
+  Separately, the bundled Italian stopword list now lists both accent forms
+  of each word. A per-language `char_map` (e.g. `{"é": "è", "á": "à"}`)
+  and an optional word-level `word_map` (e.g. `{"et": "e", "christo":
+  "cristo"}`) would be applied after NFC normalization and before
+  tokenizing, in every analysis, with the replacements counted and
+  reported. Until then, normalize copies of the texts first (the study did
+  this in a standalone `normalize.py`).
 
 ## Robustness
 

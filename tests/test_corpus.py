@@ -521,3 +521,22 @@ def test_empty_corpus_root_flag_is_an_error(tmp_path):
 def test_tokenize_removes_soft_hyphens():
     from cross_lingual_toolkit.corpus import tokenize
     assert tokenize("co\u00adoperate now", remove_stopwords=False) == ["cooperate", "now"]
+
+
+def test_bundled_italian_stopwords_list_both_accent_forms():
+    # Editions accent final vowels differently (perché / perchè); a list
+    # with only one form keeps the other as a content word.
+    path = os.path.join(corpus._BUNDLED_STOPWORDS_DIR, 'stopwords_it_medieval.txt')
+    with open(path, encoding='utf-8') as fh:
+        words = {line.strip() for line in fh
+                 if line.strip() and not line.startswith('#')}
+    acute, grave = 'áéíóú', 'àèìòù'
+    to_grave = str.maketrans(acute, grave)
+    to_acute = str.maketrans(grave, acute)
+    missing = sorted(
+        variant
+        for w in words
+        for variant in (w.translate(to_grave), w.translate(to_acute))
+        if variant not in words
+    )
+    assert missing == []
