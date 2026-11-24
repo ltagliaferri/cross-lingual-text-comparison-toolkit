@@ -161,7 +161,7 @@ _MINIMUM_INT_SETTINGS = (
 # Settings sections that must be JSON objects when present.
 _SETTINGS_SECTIONS = ('output', 'chunking', 'lexical_richness', 'analysis',
                       'adjective_window', 'dependency_parsing', 'topic_modeling',
-                      'stylometry')
+                      'stylometry', 'parallel_passages')
 
 
 def _check_list(value, where, problems):
@@ -353,6 +353,9 @@ def _check_requirements(config, require, check_paths, problems, warnings):
             # top, because stylometry imports this module
             from .stylometry import check_config as check_stylometry
             used_corpora.extend(check_stylometry(config, check_paths, problems, warnings))
+        elif name == 'parallel_passages':
+            from .parallel_passages import check_config as check_parallel
+            used_corpora.extend(check_parallel(config, check_paths, problems, warnings))
         else:
             _check_section(config, name, cross_langs, problems)
 

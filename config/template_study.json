@@ -181,6 +181,22 @@
     "random_seed": 42
   },
 
+  "parallel_passages": {
+    "_comment": "Used by parallel_passages.py (xlt-parallel-passages): find where the source corpus translates, quotes or paraphrases the target corpora, sentence by sentence, with the embedding_model. Reads the raw texts (xlt-embed-corpus need not have run); sentence embeddings are cached as embeddings/parallel_<corpus_id>_sentences.npy. Only source and targets are required. source: the corpus id whose sentences are searched for. targets: non-empty list of corpus ids to search in, not including source. min_sentence_chars (40): shorter sentences are skipped. max_sentence_chars (600): longer sentences are wrapped into pieces of at most this length (below min_sentence_chars is accepted with a warning). sentence_split: regular expression that splits each paragraph into sentences (default: after . ? ! ; : followed by whitespace, and after the CJK 。！？ with or without whitespace). location_patterns (optional): {corpus_id: regex}; a sentence's location is the last match (group 1 if the regex has a group) in its text up to and including it, e.g. chapter headings, matched with re.MULTILINE; otherwise the collection item (group/item) or p<paragraph number> of a single file. threshold (0.70): minimum cosine similarity for a match. Matches are merged into runs separately for each target text (collection item or single file): a passage is a run of matches into one target text in source order with at most merge_gap (5) source sentences between consecutive matches, whatever those sentences matched (a match into another text does not end the run, so passages into different texts may overlap), the target index moving forward by at most target_window (10) sentences or back by 1; it needs at least min_passage_sentences (2) matches. align (true): align each passage's source span with its target span extended by align_context (2) target sentences each side, in groups of 1-3 sentences per side; skip_penalty (0.35) is the cost of leaving a sentence unaligned.",
+    "source": "author_a_work",
+    "targets": ["author_b_work"],
+    "min_sentence_chars": 40,
+    "max_sentence_chars": 600,
+    "location_patterns": {},
+    "threshold": 0.70,
+    "merge_gap": 5,
+    "target_window": 10,
+    "min_passage_sentences": 2,
+    "align": true,
+    "align_context": 2,
+    "skip_penalty": 0.35
+  },
+
   "topic_modeling": {
     "_comment": "Used by analysis_b_topics.py. min_topic_size is the smallest number of chunks BERTopic will call a topic — lower it for small corpora (minimum 2). The remaining keys are language codes; extra_stopwords supplements load_stopwords(), keep_stopwords exempts specific words from removal.",
     "min_topic_size": 8,

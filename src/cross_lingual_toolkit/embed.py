@@ -203,12 +203,15 @@ def _cache_key(texts: List[str], model_name: Optional[str]) -> str:
 def embed_chunks(chunks: List[dict], model,
                  cache_path: Optional[Path] = None,
                  batch_size: int = 16,
-                 model_name: Optional[str] = None) -> np.ndarray:
+                 model_name: Optional[str] = None,
+                 too_long_hint: Optional[str] = None) -> np.ndarray:
     """
     Embed a list of chunk dicts and optionally cache to disk. Next to the
     .npy cache a `.key` file stores a hash of `model_name` and the chunk
     texts; the cache is reused only if that hash matches, so changing the
     texts, the chunking settings or the model recomputes the embeddings.
+    `too_long_hint` replaces the advice printed when chunks exceed the
+    model's input window; `{chars}` in it becomes the suggested length.
     """
     texts = [c["text"] for c in chunks]
     key = _cache_key(texts, model_name)
@@ -227,9 +230,10 @@ def embed_chunks(chunks: List[dict], model,
     if report and report['over']:
         print(f"  WARNING: {report['over']} of {report['total']} chunks are longer than "
               f"the model's input window of {report['limit']} word-pieces, so the text "
-              f"past the window is not embedded. Lower chunking.max_chars (about "
-              f"{report['suggested_max_chars']} characters fits this corpus) and rerun "
-              f"xlt-embed-corpus.")
+              f"past the window is not embedded. "
+              + (too_long_hint or 'Lower chunking.max_chars (about {chars} characters '
+                 'fits this corpus) and rerun xlt-embed-corpus.').format(
+                  chars=report['suggested_max_chars']))
     print(f"  Embedding {len(texts)} chunks…")
     embeddings = model.encode(
         texts,
