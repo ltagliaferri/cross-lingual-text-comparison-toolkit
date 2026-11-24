@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# xlt-embed-corpus, xlt-analysis-umap
+# xlt-embed-corpus, xlt-analysis-umap, xlt-parallel-passages
 embeddings = [
     "sentence-transformers>=2.2",
     "umap-learn>=0.5",
@@ -56,6 +56,7 @@ xlt-cross-corpus-dependency = "cross_lingual_toolkit.cross_corpus_dependency:mai
 xlt-analysis-umap = "cross_lingual_toolkit.analysis_a_umap:main"
 xlt-analysis-topics = "cross_lingual_toolkit.analysis_b_topics:main"
 xlt-stylometry = "cross_lingual_toolkit.stylometry:main"
+xlt-parallel-passages = "cross_lingual_toolkit.parallel_passages:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

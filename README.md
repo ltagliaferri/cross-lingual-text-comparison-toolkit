@@ -58,6 +58,7 @@ over `output.root`.
 | `analysis_a_umap.py` | `xlt-analysis-umap` | Embedding-space clustering by author/work, UMAP projection, permutation test |
 | `analysis_b_topics.py` | `xlt-analysis-topics` | Cross-lingual topic modeling (BERTopic over the embedding space) |
 | `stylometry.py` | `xlt-stylometry` | Same-language stylometry: most-frequent-word Delta between groups, leave-one-out attribution, General Imposters verification, rolling Delta |
+| `parallel_passages.py` | `xlt-parallel-passages` | Cross-lingual parallel-passage search: best match for every source sentence in the target corpora, merged into passages and aligned sentence by sentence |
 
 ## Method
 
@@ -221,6 +222,86 @@ Cautions:
   closely as possible. With fewer than three imposter groups or ten
   imposter samples it is weak, and the script prints a warning.
 
+**Parallel-passage search** (`parallel_passages.py`). Finds where one
+corpus (the `source`) translates, quotes or paraphrases others (the
+`targets`) in another language: an author's own translation embedded in a
+third work, say, or a biographer quoting a subject's letters. It reads the
+raw texts with the same loaders as every other script (so
+`xlt-embed-corpus` need not have run), splits each text or collection item
+into blank-line-separated paragraphs and then into sentences at
+`sentence_split` (whitespace collapsed, NFC), and embeds every sentence
+with `embedding_model`, caching them as
+`embeddings/parallel_<corpus_id>_sentences.npy` (re-embedded when the
+sentences or the model change). For each source sentence it keeps the
+best and runner-up target sentence across all targets by cosine
+similarity, computed in blocks of 512 rows so memory stays bounded.
+
+Matches (score ≥ `threshold`) are merged into runs separately for each
+target text (the same collection item, or the same single-file corpus).
+Walking the source in order, a match joins the current run into its
+target text if at most `merge_gap` source sentences lie since that run's
+last match (whatever those sentences matched, so a match into another
+text does not end the run) and its target index moves forward by at most
+`target_window` sentences (or back by one, since the two sides split
+sentences differently); otherwise it starts a new run in that text, while
+the old run stays open for later matches that fit it. Runs
+with at least `min_passage_sentences` matches are passages. With `align`,
+each passage's source span is aligned with its target span (extended by
+`align_context` sentences each side, within the same target text) by a
+monotonic dynamic programme over groups of 1–3 sentences per side (steps
+1–1, 1–2, 2–1, 1–3, 3–1, 2–2, 2–3, 3–2), each scored as the cosine of the
+joined groups' embeddings × (sentences on both sides) / 2; leaving one
+sentence unaligned costs `skip_penalty`.
+
+Config keys (all optional except `source` and `targets`):
+
+| Key | Meaning | Default |
+|---|---|---|
+| `source` | corpus id whose sentences are searched for | required |
+| `targets` | non-empty list of corpus ids to search in; must not include `source` | required |
+| `min_sentence_chars` | sentences shorter than this are skipped | 40 |
+| `max_sentence_chars` | longer sentences are wrapped (at whitespace) into pieces of at most this length; a value below `min_sentence_chars` is accepted with a warning | 600 |
+| `sentence_split` | regular expression splitting a paragraph into sentences | after `.` `?` `!` `;` `:` followed by whitespace, and after `。` `！` `？` with or without whitespace |
+| `location_patterns` | `{corpus_id: regex}`. A sentence's location is the last match of the regex (`re.MULTILINE`) in its text up to and including the sentence: group 1 if the regex has a group, else the whole match, e.g. chapter headings | the collection item (`group/item`), or `p<paragraph>` in a single file; also used before a pattern's first match |
+| `threshold` | minimum cosine similarity for a sentence match to count as a match and join a passage (0–1) | 0.70 |
+| `merge_gap` | most source sentences between two consecutive matches of one passage (counted in the source, whatever they matched; translators condense, so several source sentences in a row can fall below threshold inside a real translation) | 5 |
+| `target_window` | most target sentences a passage may move forward between consecutive matches (a step back of one is allowed) | 10 |
+| `min_passage_sentences` | matched source sentences a run needs to become a passage | 2 |
+| `align` | align each passage sentence by sentence and write `parallel_alignment.csv` | `true` |
+| `align_context` | target sentences added each side of a passage's span before aligning | 2 |
+| `skip_penalty` | alignment cost of leaving one sentence unaligned | 0.35 |
+
+Outputs: `results/parallel_sentences.csv` (one row per source sentence
+in order: `source_idx, source_location, score, runner_up, margin,
+target_corpus, target_location, target_idx, source_text, target_text`;
+indices count sentences within each corpus), `results/parallel_passages.csv`
+(`passage, source_first, source_last, source_location, n_matches,
+mean_score, max_score, target_corpus, target_location, target_first,
+target_last, source_text, target_text`), `results/parallel_alignment.csv`
+(with `align`: `passage, unit, source_first, source_last, target_first,
+target_last, similarity, source_text, target_text`; a skipped sentence
+has one side empty and no similarity), `results/parallel_summary.txt`
+(sentence counts, score quantiles, counts at or above 0.60–0.80, the
+passages and their locations) and `visualizations/parallel_passages.png`
+(the best score along the source, with the threshold and the passages
+shaded). It needs the `embeddings` extra.
+
+Reading the results: validate the settings on a known translation pair
+in your corpus first, to see what scores a real translation gets with
+your model and texts. Passages, runs of nearby matches into one target
+text, are much stronger evidence than isolated matches; isolated
+matches between about 0.70 and 0.80 are often shared formulae (stock
+phrases, liturgy, scripture) rather than translation. Runs are merged per
+target text, so passages into different target texts can overlap in
+source span: a source passage may translate one text while a few of its
+sentences also match another, as stock phrases or a second witness. A
+stock phrase repeated elsewhere in the same target text can still
+distort a passage: if it lands within `target_window` of the run it
+joins the run, and a long enough stretch of such matches splits it. The
+score measures shared meaning, not wording, so paraphrase is found as
+well as translation, and a high score is not proof of translation: read
+the aligned pairs.
+
 **Counting.** Configured terms, forms, lemmas and stopwords are matched
 case-insensitively and after Unicode NFC normalization, exactly as the
 text is tokenized (lowercase, NFC, split on anything that is not a
@@ -275,7 +356,7 @@ Top-level keys:
   rather than guess).
 - `term_frequency_clusters`, `adjective_anchor_terms`, `dependency_agents`,
   `cross_corpus_concept_clusters`, `cross_corpus_dependency`,
-  `topic_modeling`, `stylometry` — the domain-specific term lists each script needs. All
+  `topic_modeling`, `stylometry`, `parallel_passages` — the domain-specific term lists and settings each script needs. All
   keys inside these are your own vocabulary, not fixed categories.
 - `colors`, `chunking`, `embedding_model`, `output` — cosmetic/pipeline
   defaults, all optional (`embedding_model` defaults to
@@ -373,6 +454,8 @@ referenced in `corpora[...]['path']`), and `--output-root path/to/output`.
    - `stylometry.py` reads only its `stylometry` section (see
      **Stylometry (same language)** above), whose corpora must share one
      language.
+   - `parallel_passages.py` reads only its `parallel_passages` section
+     (see **Parallel-passage search** above).
    - `embed_corpus.py` embeds every entry in `corpora`;
      `analysis_a_umap.py` plots the corpora beyond the two compared ones
      as context.
@@ -396,7 +479,7 @@ only what your analysis needs:
 
 ```bash
 pip install -e .                  # core: frequency, lexical richness, stylometry
-pip install -e ".[embeddings]"    # + embed_corpus, analysis_a_umap
+pip install -e ".[embeddings]"    # + embed_corpus, analysis_a_umap, parallel_passages
 pip install -e ".[parsing]"       # + adjective_window, both dependency scripts
 pip install -e ".[topics]"        # + analysis_b_topics
 pip install -e ".[all]"           # everything
@@ -445,8 +528,10 @@ Covers the corpus-independent logic — tokenization (including combining
 marks and joiners), per-script config validation and on-disk path checks,
 stopword resolution, chunking and parser splitting, the embedding cache,
 the permutation test, Dunning G², TTR/MATTR, Burrows's and Cosine
-Delta, General Imposters, dependency-label and context-window helpers — plus end-to-end runs of the model-free analyses
-over a small synthetic two-language corpus, the spaCy/Stanza extraction
+Delta, General Imposters, parallel-passage matching, run merging and
+sentence alignment, dependency-label and context-window helpers — plus end-to-end runs of the model-free analyses
+over a small synthetic two-language corpus (the parallel-passage search
+with a stub embedding model), the spaCy/Stanza extraction
 code driven by stub pipelines, and the CLI wrappers' error reporting and
 exit codes. No real corpus data and no downloaded spaCy/Stanza models are
 involved.
