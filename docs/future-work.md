@@ -130,8 +130,9 @@ and most changes what the toolkit can claim to support.
 
 ## New commands proposed (from the November 2026 study work)
 
-Both extend item 5 above (the translation-pair validation command), which
-stays the place for the validation use; neither is implemented yet.
+Item 1 extends item 5 above (the translation-pair validation command), which
+stays the place for the validation use. The parallel-passage search proposed
+alongside it is done (`xlt-parallel-passages`, PR #10).
 
 1. **Translation alignment and matching (`xlt-validate-pairs` /
    `xlt-align`).** It was prototyped outside the toolkit on 2026-11-18. It
@@ -146,19 +147,54 @@ stays the place for the validation use; neither is implemented yet.
    item 5's validation that the model finds translations in the user's own
    corpus, by reporting top-1 accuracy on known pairs; (b) recovering
    metadata (numbering, recipient, date) from a translated edition for
-   untitled source files.
-2. **Parallel-passage search (`xlt-parallel-passages`).** Also prototyped
-   on 2026-11-18. It splits two corpora in different languages into
-   sentences, embeds them, and for every sentence of one finds its nearest
-   sentence in the other, with the runner-up score. It reports matches over
-   a threshold with locations, and merges runs of consecutive matches into
-   passages. It found an author's Latin translation of the closing chapters
-   of a vernacular work embedded inside a third work (43 of the 82
-   sentence matches at 0.70 or higher, best 0.94). Notes for an
-   implementation: sentence splitting on `.?!;:` creates false
-   "differences" when the two sides split a sentence differently, so align
-   in windows of a few sentences or merge neighbours before comparing.
-   Matches between about 0.70 and 0.80 that fall outside such runs were
-   mostly shared devotional phrases rather than translations. Useful for
-   finding quotation, translation and paraphrase between corpora, and for
-   comparing a translator's version against its source.
+   untitled source files. Once a pair is matched, the sentence-by-sentence
+   alignment in `parallel_passages.align` (monotonic, groups of one to
+   three sentences per side) can be reused to align it.
+2. **Marker rates (short words and phrases).** Count small sets of
+   configured function words and phrases (hedges such as *quasi* or *in
+   certo modo*, glosses such as *id est* or *cioè*, interjections, *volo* /
+   *voglio*) per 10k words, per corpus or group, with equivalents per
+   language. The existing cluster counting can't do this:
+   `metrics.count_cluster_terms` matches single tokens only, so multi-word
+   phrases are impossible, and it counts after stopword removal, which
+   drops exactly these words. Needs phrase terms and an option to count
+   over all tokens. In the 2026-11 study these markers separated a
+   translator's voice from his source's (hedges 9.8 against 2.0 per 10k in
+   the reported speech of one author and in her own writing) where the
+   embedding distances could not.
+3. **Narration versus reported speech.** For narrative sources (saints'
+   lives, chronicles, novels), a command that extracts direct quotations,
+   writes a CSV for hand-labelling speakers (with surrounding context and a
+   heuristic guess), reads the labels back, and reports any configured
+   measure by speaker, with the narration as one more group. Quote pairing
+   must cope with straight quotes and unclosed quotations (pair within a
+   paragraph; an unclosed quote runs to the paragraph's end). In the study
+   a heuristic speaker guess was right only about 63% of the time, so the
+   hand-label round trip is the core of the feature, not an extra. Reported
+   speech by other characters is the needed control: it separates "speech"
+   from "this speaker".
+4. **A calibration baseline (`xlt-calibrate`).** Report any distance
+   (embedding similarity, Delta, marker rates) between two groups next to
+   a reference gap from the user's own data, for example one bilingual
+   author's distance between his two languages, or between two genres in
+   one language. A raw distance between two authors writing in different
+   languages has no scale without it. The planned reference case is Dante's
+   *Convivio* IV against the *Monarchia*: same author and topic, Italian
+   and Latin.
+5. **Method notes (`docs/methods.md`).** No code; corpus-free guidance
+   learned in the 2026-11 study:
+   - LaBSE is trained to make translations identical, so it discards the
+     habits of expression that authorship rests on. Across languages it
+     tracks topic and genre. Use it to find translations and parallels, not
+     to measure voice.
+   - When author, language and genre coincide (each author wrote in only
+     one language), look for passages that hold one of them fixed. A
+     translation with a known source holds language and writer fixed. Then
+     every departure from the source belongs to the translator.
+   - Compare reported speech against narration only with other speakers'
+     reported speech as a control.
+   - Check OCR against the page images before any analysis. A critical
+     edition's apparatus, running heads, facing-page margins and photos taken
+     at an angle all leak into raw OCR. A hand-"corrected" OCR file can be
+     worse than the raw output.
+
